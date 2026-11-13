@@ -1,5 +1,6 @@
 package com.endpointposture.ise;
 
+
 /**
  * Transport-agnostic interface for talking to Cisco ISE. Exactly two
  * operations, matching everything this platform is allowed to do per its
@@ -37,6 +38,15 @@ public interface IseTransport {
      * @return the result, always non-null
      */
     IseResult publishEnforcement(String mac, EnforcementAction action, String policy);
+
+    /** Resolves request policy defaults before the intended action is persisted for retries. */
+    default String effectivePolicy(String requestedPolicy) { return requestedPolicy; }
+
+    /** Reads ISE state where its API exposes enough information to verify a recorded operation. */
+    default IseReconciliationResult reconcile(IseOperation operation) {
+        return new IseReconciliationResult(IseReconciliationResult.Outcome.INCONCLUSIVE,
+                "This ISE transport does not support state readback for the operation");
+    }
 
     /** @return whether ISE currently answers a lightweight probe request */
     boolean reachable();

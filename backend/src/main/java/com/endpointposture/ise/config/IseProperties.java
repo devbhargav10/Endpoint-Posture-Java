@@ -36,6 +36,7 @@ public class IseProperties {
     private String trustStorePassword = "";
     private String trustStoreType = "PKCS12";
     private long sessionPollIntervalMs = 15000;
+    private long requestTimeoutMs = 10000;
     private Mode enforcementMode = Mode.ATTRIBUTE;
 
     /**
@@ -62,6 +63,8 @@ public class IseProperties {
     public void setTrustStoreType(String v) { this.trustStoreType = v; }
     public long getSessionPollIntervalMs() { return sessionPollIntervalMs; }
     public void setSessionPollIntervalMs(long v) { this.sessionPollIntervalMs = v; }
+    public long getRequestTimeoutMs() { return requestTimeoutMs; }
+    public void setRequestTimeoutMs(long v) { this.requestTimeoutMs = v; }
     public Mode getEnforcementMode() { return enforcementMode; }
     public void setEnforcementMode(Mode v) { this.enforcementMode = v; }
     public String getAncPolicyName() { return ancPolicyName; }

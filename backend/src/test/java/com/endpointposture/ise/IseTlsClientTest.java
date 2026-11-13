@@ -97,7 +97,12 @@ class IseTlsClientTest {
 
         IseSessionClient.SessionPoll poll = new IseSessionClient(properties).fetchActiveSessions();
         assertFalse(poll.ok());
-        assertFalse(new ErsIseTransport(properties).reachable());
+        ErsIseTransport transport = new ErsIseTransport(properties);
+        assertFalse(transport.reachable());
+        IseResult action = transport.publishPosture("AA:BB:CC:DD:EE:01", "COMPLIANT", "none");
+        assertFalse(action.success());
+        assertFalse(action.ambiguous());
+        assertFalse(action.retryable());
     }
 
     private IseProperties properties() {

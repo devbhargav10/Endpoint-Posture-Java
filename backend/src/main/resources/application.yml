@@ -129,6 +129,14 @@ app:
     trust-store-password: ${ISE_TRUSTSTORE_PASSWORD:}
     trust-store-type: ${ISE_TRUSTSTORE_TYPE:PKCS12}
     session-poll-interval-ms: 15000
+    request-timeout-ms: "${ISE_REQUEST_TIMEOUT_MS:10000}"
+    operations:
+      max-attempts: "${ISE_OPERATION_MAX_ATTEMPTS:3}"
+      retry-base-seconds: "${ISE_OPERATION_RETRY_BASE_SECONDS:30}"
+      retry-max-seconds: "${ISE_OPERATION_RETRY_MAX_SECONDS:900}"
+      retry-batch-size: "${ISE_OPERATION_RETRY_BATCH_SIZE:25}"
+      recovery-interval-ms: "${ISE_OPERATION_RECOVERY_INTERVAL_MS:60000}"
+      stale-after-ms: "${ISE_OPERATION_STALE_AFTER_MS:300000}"
     disconnect-grace-polls: 2
     # S12: last_seen_at is rewritten for a still-connected device only when older than this.
     touch-min-minutes: 5

@@ -1,5 +1,7 @@
 package com.endpointposture.ise;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
+
 /**
  * Outcome of one call to Cisco ISE — either publishing a posture fact or
  * requesting an enforcement action.
@@ -9,4 +11,9 @@ package com.endpointposture.ise;
  *                or the failure reason on failure. Never {@code null} —
  *                callers store this verbatim in the audit trail.
  */
-public record IseResult(boolean success, String detail) {}
+public record IseResult(boolean success, String detail, boolean ambiguous, boolean retryable) {
+    public IseResult(boolean success, String detail) { this(success, detail, false, false); }
+    public IseResult(boolean success, String detail, boolean ambiguous) { this(success, detail, ambiguous, false); }
+    @Override @JsonIgnore public boolean ambiguous() { return ambiguous; }
+    @Override @JsonIgnore public boolean retryable() { return retryable; }
+}

@@ -2,6 +2,7 @@ package com.endpointposture.ise;
 
 import com.endpointposture.ise.dto.EnforcementRequest;
 import com.endpointposture.ise.dto.ShareRequest;
+import com.endpointposture.ise.dto.IseOperationResolutionRequest;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -10,8 +11,11 @@ import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.security.access.prepost.PreAuthorize;
+import java.util.UUID;
 
 /**
  * The only place Cisco ISE enforcement is ever triggered from - three
@@ -32,9 +36,11 @@ import org.springframework.security.access.prepost.PreAuthorize;
 public class IseActionController {
 
     private final IseActionService service;
+    private final IseOperationStore operations;
 
-    public IseActionController(IseActionService service) {
+    public IseActionController(IseActionService service, IseOperationStore operations) {
         this.service = service;
+        this.operations = operations;
     }
 
     /**
@@ -89,5 +95,22 @@ public class IseActionController {
     public ResponseEntity<IseResult> clear(@Valid @RequestBody EnforcementRequest req, Authentication auth) {
         IseResult result = service.clearRestriction(req.endpointId(), auth.getName());
         return ResponseEntity.status(result.success() ? 200 : 502).body(result);
+    }
+
+    @Operation(summary = "List ISE operations that require manual reconciliation",
+            description = "ISE ERS readback cannot reliably confirm the outcome of every supported action. Verify the endpoint in ISE before resolving.")
+    @PreAuthorize("hasRole('ADMIN')")
+    @GetMapping("/operations/reconciliation-required")
+    public ResponseEntity<?> reconciliationRequired() {
+        return ResponseEntity.ok(operations.pendingReconciliation(200));
+    }
+
+    @Operation(summary = "Resolve an ambiguous ISE operation after checking ISE")
+    @PreAuthorize("hasRole('ADMIN')")
+    @PostMapping("/operations/{id}/resolve")
+    public ResponseEntity<?> resolve(@PathVariable UUID id, @Valid @RequestBody IseOperationResolutionRequest request,
+                                     Authentication auth) {
+        boolean resolved = operations.resolve(id, auth.getName(), request.resolution(), request.supportingDetails());
+        return resolved ? ResponseEntity.ok().build() : ResponseEntity.notFound().build();
     }
 }

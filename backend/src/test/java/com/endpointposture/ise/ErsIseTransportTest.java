@@ -7,12 +7,14 @@ import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -231,5 +233,98 @@ class ErsIseTransportTest {
 
         assertFalse(result.success());
         assertTrue(result.detail() != null && !result.detail().isBlank());
+        assertTrue(result.ambiguous());
+        assertFalse(result.retryable());
+    }
+
+    @Test
+    void authenticationRejectionIsDefinitive() {
+        handle("/ers/config/endpoint", exchange -> {
+            exchange.sendResponseHeaders(401, -1);
+            exchange.close();
+        });
+        IseResult result = new ErsIseTransport(buildProps(IseProperties.Mode.ANC))
+                .publishPosture("AA:BB:CC:DD:EE:08", "COMPLIANT", "none");
+        assertFalse(result.success());
+        assertFalse(result.ambiguous());
+        assertFalse(result.retryable());
+    }
+
+    @Test
+    void readTimeoutIsMarkedAmbiguousAndNotRetryable() {
+        handle("/ers/config/endpoint", exchange -> {
+            try { Thread.sleep(300); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+            try { sendJson(exchange, 200, "{\"SearchResult\":{\"resources\":[]}}"); }
+            catch (IOException ignored) { exchange.close(); }
+        });
+        IseProperties properties = buildProps(IseProperties.Mode.ANC);
+        properties.setRequestTimeoutMs(50);
+        IseResult result = new ErsIseTransport(properties)
+                .publishPosture("AA:BB:CC:DD:EE:09", "COMPLIANT", "none");
+        assertFalse(result.success());
+        assertTrue(result.ambiguous());
+        assertFalse(result.retryable());
+    }
+
+    @Test
+    void refusedConnectionIsSafeToRetry() {
+        server.stop(0);
+        server = null;
+        IseResult result = new ErsIseTransport(buildProps(IseProperties.Mode.ANC))
+                .publishPosture("AA:BB:CC:DD:EE:10", "COMPLIANT", "none");
+        assertFalse(result.success());
+        assertFalse(result.ambiguous());
+        assertTrue(result.retryable());
+    }
+
+    @Test
+    void resultJsonKeepsExistingResponseShape() throws Exception {
+        String json = new ObjectMapper().writeValueAsString(new IseResult(false, "timeout", true, false));
+        assertEquals("{\"success\":false,\"detail\":\"timeout\"}", json);
+    }
+
+    @Test
+    void reconcilesAncPolicyByReadingItsPersistedEndpointState() {
+        handle("/ers/config/ancendpoint", exchange -> {
+            if (exchange.getRequestURI().getPath().endsWith("anc-1"))
+                sendJson(exchange, 200, "{\"ERSAncEndpoint\":{\"macAddress\":\"AA:BB:CC:DD:EE:11\",\"policyName\":\"Quarantine\"}}");
+            else sendJson(exchange, 200, "{\"SearchResult\":{\"resources\":[{\"id\":\"anc-1\"}]}}");
+        });
+        ErsIseTransport transport = new ErsIseTransport(buildProps(IseProperties.Mode.ANC));
+        IseOperation operation = new IseOperation(UUID.randomUUID(), UUID.randomUUID(),
+                "AA:BB:CC:DD:EE:11", "RESTRICT", "alice", null, null, null);
+        IseReconciliationResult result = transport.reconcile(operation);
+        assertEquals(IseReconciliationResult.Outcome.SUCCEEDED, result.outcome());
+    }
+
+    @Test
+    void reconcilesClearWhenNoAncPolicyExistsAndKeepsUnsupportedReadbackInconclusive() {
+        handle("/ers/config/ancendpoint", exchange ->
+                sendJson(exchange, 200, "{\"SearchResult\":{\"resources\":[]}}"));
+        ErsIseTransport ancTransport = new ErsIseTransport(buildProps(IseProperties.Mode.ANC));
+        IseOperation clear = new IseOperation(UUID.randomUUID(), UUID.randomUUID(),
+                "AA:BB:CC:DD:EE:12", "CLEAR_RESTRICTION", "alice", null, null, null);
+        assertEquals(IseReconciliationResult.Outcome.SUCCEEDED, ancTransport.reconcile(clear).outcome());
+
+        ErsIseTransport attributeTransport = new ErsIseTransport(buildProps(IseProperties.Mode.ATTRIBUTE));
+        assertEquals(IseReconciliationResult.Outcome.INCONCLUSIVE, attributeTransport.reconcile(
+                new IseOperation(UUID.randomUUID(), UUID.randomUUID(), "AA:BB:CC:DD:EE:12",
+                        "RESTRICT", "alice", null, null, null)).outcome());
+    }
+
+    @Test
+    void reconcilesSharedPostureAttributesByEndpointReadback() {
+        handle("/ers/config/endpoint", exchange -> {
+            if (exchange.getRequestURI().getPath().endsWith("endpoint-1")) {
+                sendJson(exchange, 200, "{\"ERSEndPoint\":{\"customAttributes\":{\"customAttributes\":{"
+                        + "\"ExternalComplianceStatus\":\"NON_COMPLIANT\",\"PostureFailedChecks\":\"FIREWALL\"}}}}");
+            } else {
+                sendJson(exchange, 200, "{\"SearchResult\":{\"resources\":[{\"id\":\"endpoint-1\"}]}}");
+            }
+        });
+        IseOperation operation = new IseOperation(UUID.randomUUID(), UUID.randomUUID(),
+                "AA:BB:CC:DD:EE:13", "SHARE_POSTURE", "alice", null, "NON_COMPLIANT", "FIREWALL");
+        IseReconciliationResult result = new ErsIseTransport(buildProps(IseProperties.Mode.ANC)).reconcile(operation);
+        assertEquals(IseReconciliationResult.Outcome.SUCCEEDED, result.outcome());
     }
 }
