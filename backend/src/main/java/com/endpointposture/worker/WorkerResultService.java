@@ -66,7 +66,8 @@ public class WorkerResultService {
         }
         if (request.jobType() == null || request.collectionOutcome() == null
                 || request.errors() == null || request.warnings() == null
-                || !request.isReportPayloadValid()) {
+                || !request.areCollectionsWithinLimits() || !request.isReportPayloadValid()
+                || !request.isReportPayloadWithinLimit()) {
             throw new IllegalArgumentException("The result envelope is incomplete or reportPayload is invalid for its outcome");
         }
         if (!request.isProcessOutcomeConsistent()) {
