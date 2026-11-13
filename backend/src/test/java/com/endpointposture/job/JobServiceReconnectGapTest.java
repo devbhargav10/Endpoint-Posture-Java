@@ -38,6 +38,8 @@ class JobServiceReconnectGapTest {
         service = new JobService(jobs, endpoints); // default 60 minute gap
         when(endpoints.findById(id)).thenReturn(Optional.of(Endpoint.builder().id(id).build()));
         when(jobs.save(any())).thenAnswer(i -> i.getArgument(0));
+        when(jobs.findFirstByEndpoint_IdAndJobTypeAndStatusInOrderByCreatedAtAsc(eq(id), any(), anyCollection()))
+                .thenReturn(Optional.of(PostureJob.builder().id(UUID.randomUUID()).endpoint(Endpoint.builder().id(id).build()).jobType(JobType.POSTURE_CHECK).status(JobStatus.QUEUED).build()));
         when(jobs.existsByEndpoint_IdAndJobTypeAndStatusIn(eq(id), any(), anyCollection())).thenReturn(false);
         when(jobs.findFirstByEndpoint_IdAndJobTypeAndStatusOrderByCompletedAtDesc(
                 eq(id), eq(JobType.POSTURE_CHECK), eq(JobStatus.COMPLETE))).thenReturn(Optional.empty());
@@ -53,7 +55,7 @@ class JobServiceReconnectGapTest {
     @Test
     void neverCheckedEnqueuesOnReconnect() {
         service.enqueueIfDue(id, JobType.POSTURE_CHECK);
-        verify(jobs).save(any());
+        verify(jobs).insertActiveIfAbsent(eq(id), eq(JobType.POSTURE_CHECK.name()), any(Integer.class));
     }
 
     @Test
@@ -67,7 +69,7 @@ class JobServiceReconnectGapTest {
     void checkedTwoHoursAgoEnqueues() {
         lastCompletedAgo(Duration.ofHours(2));
         service.enqueueIfDue(id, JobType.POSTURE_CHECK);
-        verify(jobs).save(any());
+        verify(jobs).insertActiveIfAbsent(eq(id), eq(JobType.POSTURE_CHECK.name()), any(Integer.class));
     }
 
     @Test
@@ -75,7 +77,7 @@ class JobServiceReconnectGapTest {
         service = new JobService(jobs, endpoints, 0L);
         lastCompletedAgo(Duration.ofSeconds(5));
         service.enqueueIfDue(id, JobType.POSTURE_CHECK);
-        verify(jobs).save(any());
+        verify(jobs).insertActiveIfAbsent(eq(id), eq(JobType.POSTURE_CHECK.name()), any(Integer.class));
     }
 
     @Test

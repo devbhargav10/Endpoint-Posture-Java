@@ -133,7 +133,8 @@ class WorkerAuthenticationFlowTest {
     void enrollAuthenticateClaimOwnShardOnlyAndCompleteWithTheFencingToken() throws Exception {
         UUID ep = endpoint("DD:00:00:00:01:01", "10.1.0.1");
         UUID jobA = job(ep, "site-a");
-        UUID jobB = job(ep, "site-b");
+        UUID otherEndpoint = endpoint("DD:00:00:00:01:02", "10.1.0.2");
+        UUID jobB = job(otherEndpoint, "site-b");
 
         String token = adminCreatesToken("flow-a", "site-a");
         JsonNode enrolled = enrollOk(token);

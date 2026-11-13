@@ -192,8 +192,9 @@ public interface PostureJobRepository extends JpaRepository<PostureJob, UUID> {
                         SELECT j.* FROM posture_job j
                         JOIN worker_registry w ON w.id::text = j.claimed_by
                         WHERE j.status = 'RUNNING' AND w.enabled = false
+                        ORDER BY j.started_at ASC, j.id ASC
                         """, nativeQuery = true)
-        List<PostureJob> findRunningJobsOwnedByRevokedWorkers();
+        List<PostureJob> findRunningJobsOwnedByRevokedWorkers(Pageable pageable);
 
         /** Fails only the current attempt while its recorded owner is still revoked. */
         @Modifying(clearAutomatically = true, flushAutomatically = true)
@@ -271,7 +272,7 @@ public interface PostureJobRepository extends JpaRepository<PostureJob, UUID> {
          * @param pageable page request, normally {@code PageRequest.of(0, limit)}
          * @return the newest jobs first, with their endpoints loaded
          */
-        @Query("SELECT j FROM PostureJob j JOIN FETCH j.endpoint ORDER BY j.createdAt DESC")
+        @Query("SELECT j FROM PostureJob j JOIN FETCH j.endpoint ORDER BY j.createdAt DESC, j.id DESC")
         List<PostureJob> findRecent(Pageable pageable);
 
         /**
@@ -279,8 +280,10 @@ public interface PostureJobRepository extends JpaRepository<PostureJob, UUID> {
          * @param pageable   page request, normally {@code PageRequest.of(0, limit)}
          * @return that endpoint's newest jobs first, with the endpoint loaded
          */
-        @Query("SELECT j FROM PostureJob j JOIN FETCH j.endpoint WHERE j.endpoint.id = :endpointId ORDER BY j.createdAt DESC")
+        @Query("SELECT j FROM PostureJob j JOIN FETCH j.endpoint WHERE j.endpoint.id = :endpointId ORDER BY j.createdAt DESC, j.id DESC")
         List<PostureJob> findRecentForEndpoint(@Param("endpointId") UUID endpointId, Pageable pageable);
+
+        long countByEndpoint_Id(UUID endpointId);
 
         /**
          * @return local RUNNING jobs past the cutoff and remote RUNNING jobs with expired leases,
@@ -291,8 +294,9 @@ public interface PostureJobRepository extends JpaRepository<PostureJob, UUID> {
                          WHERE j.status = com.endpointposture.job.JobStatus.RUNNING
                            AND ((j.leaseExpiresAt IS NOT NULL AND j.leaseExpiresAt <= :now)
                                 OR (j.leaseExpiresAt IS NULL AND j.startedAt < :cutoff))
+                         ORDER BY j.startedAt ASC, j.id ASC
                         """)
-        List<PostureJob> findStaleRunning(@Param("cutoff") Instant cutoff, @Param("now") Instant now);
+        List<PostureJob> findStaleRunning(@Param("cutoff") Instant cutoff, @Param("now") Instant now, Pageable pageable);
 
         /**
          * Bulk-deletes finished jobs that completed before the cutoff. Evidence rows

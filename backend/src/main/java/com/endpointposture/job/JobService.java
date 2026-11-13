@@ -6,6 +6,7 @@ import com.endpointposture.endpoint.EndpointRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.PageRequest;
+import com.endpointposture.endpoint.dto.PageResponse;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -324,6 +325,22 @@ public class JobService {
     @Transactional(readOnly = true)
     public List<PostureJob> listForEndpoint(UUID endpointId, int limit) {
         return jobRepository.findRecentForEndpoint(endpointId, PageRequest.of(0, limit));
+    }
+
+    @Transactional(readOnly = true)
+    public PageResponse<PostureJob> pageRecent(int page, int size) {
+        int safePage = Math.max(0, page);
+        int safeSize = Math.max(1, Math.min(size, 200));
+        return new PageResponse<>(jobRepository.findRecent(PageRequest.of(safePage, safeSize)),
+                jobRepository.count(), safePage, safeSize);
+    }
+
+    @Transactional(readOnly = true)
+    public PageResponse<PostureJob> pageForEndpoint(UUID endpointId, int page, int size) {
+        int safePage = Math.max(0, page);
+        int safeSize = Math.max(1, Math.min(size, 200));
+        return new PageResponse<>(jobRepository.findRecentForEndpoint(endpointId, PageRequest.of(safePage, safeSize)),
+                jobRepository.countByEndpoint_Id(endpointId), safePage, safeSize);
     }
 
     /**

@@ -10,6 +10,7 @@ import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -36,6 +37,7 @@ public class StaleJobRecoveryScheduler {
     private final DiagnosticAgentProperties diagnosticProps;
     private final SecurityIndicatorAgentProperties securityProps;
     private final long marginSeconds;
+    private final int batchSize;
 
     public StaleJobRecoveryScheduler(
             PostureJobRepository jobRepository,
@@ -44,7 +46,8 @@ public class StaleJobRecoveryScheduler {
             HardwareAgentProperties hardwareProps,
             DiagnosticAgentProperties diagnosticProps,
             SecurityIndicatorAgentProperties securityProps,
-            @Value("${app.jobs.stale-margin-seconds:60}") long marginSeconds) {
+            @Value("${app.jobs.stale-margin-seconds:60}") long marginSeconds,
+            @Value("${app.jobs.stale-recovery-batch-size:100}") int batchSize) {
 
         this.jobRepository = jobRepository;
         this.recoveryService = recoveryService;
@@ -53,6 +56,7 @@ public class StaleJobRecoveryScheduler {
         this.diagnosticProps = diagnosticProps;
         this.securityProps = securityProps;
         this.marginSeconds = marginSeconds;
+        this.batchSize = Math.max(1, Math.min(batchSize, 500));
     }
 
     @PostConstruct
@@ -78,11 +82,12 @@ public class StaleJobRecoveryScheduler {
             Instant candidateCutoff = now.minusSeconds(shortestTimeoutSeconds + marginSeconds);
 
             Map<java.util.UUID, PostureJob> candidates = new LinkedHashMap<>();
-            for (PostureJob job : jobRepository.findStaleRunning(candidateCutoff, now)) {
+            PageRequest batch = PageRequest.of(0, batchSize);
+            for (PostureJob job : jobRepository.findStaleRunning(candidateCutoff, now, batch)) {
                 candidates.put(job.getId(), job);
             }
             // Revocation takes precedence if a job is also lease-expired.
-            List<PostureJob> revokedJobs = jobRepository.findRunningJobsOwnedByRevokedWorkers();
+            List<PostureJob> revokedJobs = jobRepository.findRunningJobsOwnedByRevokedWorkers(batch);
             Set<java.util.UUID> revokedIds = revokedJobs.stream()
                     .map(PostureJob::getId)
                     .collect(Collectors.toSet());

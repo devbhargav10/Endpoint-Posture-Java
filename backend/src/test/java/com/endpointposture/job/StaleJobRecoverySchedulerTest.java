@@ -42,7 +42,7 @@ class StaleJobRecoverySchedulerTest {
         when(diagnostics.getProcessTimeoutSeconds()).thenReturn(130);
         when(security.getProcessTimeoutSeconds()).thenReturn(170);
         scheduler = new StaleJobRecoveryScheduler(
-                jobs, recovery, posture, hardware, diagnostics, security, 60);
+                jobs, recovery, posture, hardware, diagnostics, security, 60, 100);
     }
 
     private PostureJob job(JobType type, Instant startedAt) {
@@ -63,21 +63,21 @@ class StaleJobRecoverySchedulerTest {
 
     @Test
     void emptySweepDoesNothing() {
-        when(jobs.findStaleRunning(any(Instant.class), any(Instant.class))).thenReturn(List.of());
+        when(jobs.findStaleRunning(any(Instant.class), any(Instant.class), any(org.springframework.data.domain.Pageable.class))).thenReturn(List.of());
         scheduler.sweep();
         verifyNoInteractions(recovery);
     }
 
     @Test
     void candidateQueryUsesShortestConfiguredTimeoutSoShorterJobsAreNotMissed() {
-        when(jobs.findStaleRunning(any(Instant.class), any(Instant.class))).thenReturn(List.of());
+        when(jobs.findStaleRunning(any(Instant.class), any(Instant.class), any(org.springframework.data.domain.Pageable.class))).thenReturn(List.of());
 
         Instant beforeSweep = Instant.now();
         scheduler.sweep();
         Instant afterSweep = Instant.now();
 
         ArgumentCaptor<Instant> cutoff = ArgumentCaptor.forClass(Instant.class);
-        verify(jobs).findStaleRunning(cutoff.capture(), any(Instant.class));
+        verify(jobs).findStaleRunning(cutoff.capture(), any(Instant.class), any(org.springframework.data.domain.Pageable.class));
 
         // Shortest timeout is 60s, plus the 60s margin. The previous widest-timeout
         // cutoff was 230s and could exclude a diagnostic job stale at 190s.
@@ -91,7 +91,7 @@ class StaleJobRecoverySchedulerTest {
     @Test
     void recoversLocalJobOnlyAfterItsTypeSpecificTimeout() {
         PostureJob stale = job(JobType.DIAGNOSTIC_CHECK, Instant.now().minusSeconds(300));
-        when(jobs.findStaleRunning(any(Instant.class), any(Instant.class))).thenReturn(List.of(stale));
+        when(jobs.findStaleRunning(any(Instant.class), any(Instant.class), any(org.springframework.data.domain.Pageable.class))).thenReturn(List.of(stale));
         when(recovery.recoverJob(eq(stale), eq(RecoveryType.PROCESS_TIMEOUT), any())).thenReturn(true);
 
         scheduler.sweep();
@@ -102,7 +102,7 @@ class StaleJobRecoverySchedulerTest {
     @Test
     void doesNotRecoverLocalJobStillWithinItsTypeSpecificTimeout() {
         PostureJob notStale = job(JobType.SECURITY_CHECK, Instant.now().minusSeconds(200));
-        when(jobs.findStaleRunning(any(Instant.class), any(Instant.class))).thenReturn(List.of(notStale));
+        when(jobs.findStaleRunning(any(Instant.class), any(Instant.class), any(org.springframework.data.domain.Pageable.class))).thenReturn(List.of(notStale));
 
         scheduler.sweep();
 
@@ -117,7 +117,7 @@ class StaleJobRecoverySchedulerTest {
         PostureJob live = job(JobType.POSTURE_CHECK, Instant.now().minusSeconds(5000));
         live.setClaimedBy(UUID.randomUUID().toString());
         live.setLeaseExpiresAt(Instant.now().plusSeconds(120));
-        when(jobs.findStaleRunning(any(Instant.class), any(Instant.class))).thenReturn(List.of(expired, live));
+        when(jobs.findStaleRunning(any(Instant.class), any(Instant.class), any(org.springframework.data.domain.Pageable.class))).thenReturn(List.of(expired, live));
         when(recovery.recoverJob(eq(expired), eq(RecoveryType.LEASE_EXPIRED), any())).thenReturn(true);
 
         scheduler.sweep();
@@ -131,8 +131,8 @@ class StaleJobRecoverySchedulerTest {
         PostureJob revoked = job(JobType.POSTURE_CHECK, Instant.now().minusSeconds(10));
         revoked.setClaimedBy(UUID.randomUUID().toString());
         revoked.setLeaseExpiresAt(Instant.now().minusSeconds(5));
-        when(jobs.findStaleRunning(any(Instant.class), any(Instant.class))).thenReturn(List.of(revoked));
-        when(jobs.findRunningJobsOwnedByRevokedWorkers()).thenReturn(List.of(revoked));
+        when(jobs.findStaleRunning(any(Instant.class), any(Instant.class), any(org.springframework.data.domain.Pageable.class))).thenReturn(List.of(revoked));
+        when(jobs.findRunningJobsOwnedByRevokedWorkers(any(org.springframework.data.domain.Pageable.class))).thenReturn(List.of(revoked));
         when(recovery.recoverJob(eq(revoked), eq(RecoveryType.WORKER_REVOKED), any())).thenReturn(true);
 
         scheduler.sweep();
@@ -145,7 +145,7 @@ class StaleJobRecoverySchedulerTest {
     void oneCandidateFailureDoesNotPreventFollowingCandidate() {
         PostureJob first = job(JobType.POSTURE_CHECK, Instant.now().minusSeconds(300));
         PostureJob second = job(JobType.HARDWARE_CHECK, Instant.now().minusSeconds(300));
-        when(jobs.findStaleRunning(any(Instant.class), any(Instant.class))).thenReturn(List.of(first, second));
+        when(jobs.findStaleRunning(any(Instant.class), any(Instant.class), any(org.springframework.data.domain.Pageable.class))).thenReturn(List.of(first, second));
         when(recovery.recoverJob(eq(first), eq(RecoveryType.PROCESS_TIMEOUT), any()))
                 .thenThrow(new IllegalStateException("simulated failure"));
         when(recovery.recoverJob(eq(second), eq(RecoveryType.PROCESS_TIMEOUT), any())).thenReturn(true);
