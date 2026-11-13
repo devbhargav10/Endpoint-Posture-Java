@@ -43,7 +43,7 @@ public class IseOperationRecoveryScheduler {
                             : transport.publishEnforcement(op.macAddress(), "RESTRICT".equals(op.actionType())
                                     ? EnforcementAction.RESTRICT : EnforcementAction.CLEAR, op.policy());
                 } catch (RuntimeException e) {
-                    result = new IseResult(false, e.getMessage(), true);
+                    result = new IseResult(false, "ISE outcome is unknown; reconciliation is required", true);
                 }
                 operations.finish(op.id(), result);
             }

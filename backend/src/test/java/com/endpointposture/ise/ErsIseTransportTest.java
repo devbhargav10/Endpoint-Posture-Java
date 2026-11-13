@@ -238,6 +238,24 @@ class ErsIseTransportTest {
     }
 
     @Test
+    void transportDoesNotExposeRemoteErrorBody() {
+        handle("/ers/config/endpoint", exchange -> {
+            byte[] body = "internal token=do-not-return".getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(500, body.length);
+            try (OutputStream output = exchange.getResponseBody()) {
+                output.write(body);
+            }
+        });
+
+        IseResult result = new ErsIseTransport(buildProps(IseProperties.Mode.ANC))
+                .publishPosture("AA:BB:CC:DD:EE:14", "COMPLIANT", "none");
+
+        assertFalse(result.success());
+        assertEquals("ISE returned HTTP 500", result.detail());
+        assertFalse(result.detail().contains("do-not-return"));
+    }
+
+    @Test
     void authenticationRejectionIsDefinitive() {
         handle("/ers/config/endpoint", exchange -> {
             exchange.sendResponseHeaders(401, -1);

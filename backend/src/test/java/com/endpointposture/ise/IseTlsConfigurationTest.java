@@ -39,6 +39,20 @@ class IseTlsConfigurationTest {
     }
 
     @Test
+    void configuredIseRequiresCredentials() {
+        IseProperties properties = new IseProperties();
+        properties.setBaseUrl("https://ise.example.test");
+        assertThrows(IllegalStateException.class,
+                () -> new IseTlsConfigurationValidator(properties, new MockEnvironment()));
+
+        properties.setUsername("ers-user");
+        assertThrows(IllegalStateException.class,
+                () -> new IseTlsConfigurationValidator(properties, new MockEnvironment()));
+        properties.setPassword("ers-password");
+        assertDoesNotThrow(() -> new IseTlsConfigurationValidator(properties, new MockEnvironment()));
+    }
+
+    @Test
     void enabledTlsIsAcceptedWithACustomTruststore() {
         IseProperties properties = new IseProperties();
         properties.setVerifyTls(true);

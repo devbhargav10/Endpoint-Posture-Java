@@ -141,7 +141,9 @@ public class IseActionService {
         if (!operations.claim(id)) return new IseResult(false, "Operation is already being processed", true);
         IseResult result;
         try { result = call.get(); }
-        catch (RuntimeException ex) { result = new IseResult(false, ex.getMessage(), true); }
+        catch (RuntimeException ex) {
+            result = new IseResult(false, "ISE outcome is unknown; reconciliation is required", true);
+        }
         operations.finish(id, result);
         return result;
     }

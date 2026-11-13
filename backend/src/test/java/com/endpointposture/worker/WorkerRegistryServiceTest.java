@@ -76,6 +76,15 @@ class WorkerRegistryServiceTest {
         assertThrows(IllegalStateException.class,()->registry.createEnrollmentToken("W-DUP","default",10,"admin"));
         assertThrows(IllegalArgumentException.class,()->registry.createEnrollmentToken("bad name!","default",10,"admin"));
     }
+    @Test void workerListingIsBoundedAndHonorsTheRequestedLimit() {
+        enrolled("w-list-1", "default");
+        enrolled("w-list-2", "default");
+        enrolled("w-list-3", "default");
+
+        assertEquals(2, registry.list(2).size());
+        assertEquals(1, registry.list(0).size());
+        assertEquals(3, registry.list(Integer.MAX_VALUE).size());
+    }
     @Test void workerClaimsOnlyItsShardAndOnlyOwnerCanComplete() {
         UUID ep=jdbc.queryForObject("INSERT INTO endpoint(mac_address,ip_address,connected) VALUES ('CC:00:00:00:00:01','10.0.0.1',true) RETURNING id",UUID.class);
         PostureJob job=jobService.enqueue(ep,JobType.POSTURE_CHECK,0);

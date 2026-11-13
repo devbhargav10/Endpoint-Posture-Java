@@ -16,5 +16,11 @@ public class IseTlsConfigurationValidator {
             throw new IllegalStateException(
                     "ISE TLS certificate verification must be enabled; remove app.ise.verify-tls=false");
         }
+        if (properties.isConfigured()
+                && (properties.getUsername() == null || properties.getUsername().isBlank()
+                || properties.getPassword() == null || properties.getPassword().isBlank())) {
+            throw new IllegalStateException(
+                    "ISE username and password must be configured when app.ise.base-url is set");
+        }
     }
 }

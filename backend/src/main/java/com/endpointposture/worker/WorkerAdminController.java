@@ -34,7 +34,10 @@ public class WorkerAdminController {
         return ResponseEntity.status(HttpStatus.CREATED).body(t);
     }
     @GetMapping
-    public List<WorkerRegistryService.WorkerView> list(){return registry.list();}
+    public List<WorkerRegistryService.WorkerView> list(
+            @RequestParam(defaultValue = "200") int limit) {
+        return registry.list(limit);
+    }
     @Operation(summary="Revoke a worker. Its key stops working immediately.")
     @PostMapping("/{id}/revoke")
     public ResponseEntity<Void> revoke(@PathVariable UUID id,Authentication auth,HttpServletRequest http) {

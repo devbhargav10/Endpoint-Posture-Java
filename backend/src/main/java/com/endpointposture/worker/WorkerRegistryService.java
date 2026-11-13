@@ -13,6 +13,8 @@ import java.util.regex.Pattern;
 /** Enrollment, authentication and revocation. Token redemption is a single atomic UPDATE. */
 @Service
 public class WorkerRegistryService {
+    static final int DEFAULT_LIST_LIMIT = 200;
+    static final int MAX_LIST_LIMIT = 1000;
     static final Pattern NAME=Pattern.compile("^[A-Za-z0-9][A-Za-z0-9._-]{1,62}$");
     static final Pattern SHARD=Pattern.compile("^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$");
     public enum Status{OK,UNKNOWN_KEY,REVOKED}
@@ -123,14 +125,20 @@ public class WorkerRegistryService {
 
     @Transactional(readOnly=true)
     public List<WorkerView> list(){
+        return list(DEFAULT_LIST_LIMIT);
+    }
+
+    @Transactional(readOnly=true)
+    public List<WorkerView> list(int requestedLimit){
+        int limit=Math.max(1,Math.min(requestedLimit,MAX_LIST_LIMIT));
         Instant now=Instant.now();
-        return jdbc.query("SELECT id,name,shard,enabled,created_at,last_seen_at,revoked_at,created_by FROM worker_registry ORDER BY created_at DESC",
+        return jdbc.query("SELECT id,name,shard,enabled,created_at,last_seen_at,revoked_at,created_by FROM worker_registry ORDER BY created_at DESC LIMIT ?",
           (rs,i)->{
             boolean enabled=rs.getBoolean("enabled");Instant seen=inst(rs.getTimestamp("last_seen_at"));
             return new WorkerView(rs.getObject("id",UUID.class),rs.getString("name"),rs.getString("shard"),enabled,
               rs.getTimestamp("created_at").toInstant(),seen,inst(rs.getTimestamp("revoked_at")),rs.getString("created_by"),
               stateOf(enabled,seen,now,staleAfter));
-          });
+          },limit);
     }
 
     @Transactional

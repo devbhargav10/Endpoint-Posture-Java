@@ -157,8 +157,8 @@ public class ErsIseTransport implements IseTransport {
             }
             return new IseResult(true, "Posture shared with ISE as " + status);
         } catch (Exception e) {
-            log.warn("publishPosture failed for {}: {}", mac, e.getMessage());
-            return new IseResult(false, e.getMessage(), isAmbiguous(e), isConnectFailure(e));
+            log.warn("publishPosture failed for {} ({})", mac, e.getClass().getSimpleName());
+            return failure(e);
         }
     }
 
@@ -172,9 +172,25 @@ public class ErsIseTransport implements IseTransport {
                     ? applyAnc(mac, action, policy)
                     : applyAttributeAndReauth(mac, action);
         } catch (Exception e) {
-            log.warn("publishEnforcement({}) failed for {}: {}", action, mac, e.getMessage());
-            return new IseResult(false, e.getMessage(), isAmbiguous(e), isConnectFailure(e));
+            log.warn("publishEnforcement({}) failed for {} ({})", action, mac, e.getClass().getSimpleName());
+            return failure(e);
         }
+    }
+
+    private IseResult failure(Exception e) {
+        boolean ambiguous = isAmbiguous(e);
+        boolean retryable = isConnectFailure(e);
+        String detail;
+        if (e instanceof HttpStatusCodeException statusError) {
+            detail = "ISE returned HTTP " + statusError.getStatusCode().value();
+        } else if (ambiguous) {
+            detail = "ISE outcome is unknown; reconciliation is required";
+        } else if (retryable) {
+            detail = "Could not connect to ISE; the operation will retry";
+        } else {
+            detail = "ISE request failed";
+        }
+        return new IseResult(false, detail, ambiguous, retryable);
     }
 
     private boolean isAmbiguous(Exception e) {
