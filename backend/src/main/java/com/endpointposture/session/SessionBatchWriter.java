@@ -90,6 +90,7 @@ public class SessionBatchWriter {
                                 WHERE j.endpoint_id = e.id AND j.job_type = 'POSTURE_CHECK'
                                   AND j.status = 'COMPLETE'
                                   AND j.completed_at > now() - (?::bigint * interval '1 minute')))
+            ON CONFLICT (endpoint_id, job_type) WHERE status IN ('QUEUED', 'RUNNING') DO NOTHING
             """;
 
     private final JdbcTemplate jdbc;

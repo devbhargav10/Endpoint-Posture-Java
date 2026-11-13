@@ -55,7 +55,12 @@ class JobServiceStateTest {
     // ---- enqueue ----
     @Test
     void enqueueCreatesAQueuedJobWithThreeAttempts() {
-        when(endpoints.findById(endpointId)).thenReturn(Optional.of(Endpoint.builder().id(endpointId).build()));
+        Endpoint endpoint = Endpoint.builder().id(endpointId).build();
+        when(endpoints.findById(endpointId)).thenReturn(Optional.of(endpoint));
+        when(jobs.findFirstByEndpoint_IdAndJobTypeAndStatusInOrderByCreatedAtAsc(
+                eq(endpointId), eq(JobType.HARDWARE_CHECK), anyCollection()))
+                .thenReturn(Optional.of(PostureJob.builder().endpoint(endpoint).jobType(JobType.HARDWARE_CHECK)
+                        .status(JobStatus.QUEUED).priority(10).attemptCount(0).maxAttempts(3).build()));
         PostureJob j = service.enqueue(endpointId, JobType.HARDWARE_CHECK, 10);
         assertEquals(JobStatus.QUEUED, j.getStatus());
         assertEquals(JobType.HARDWARE_CHECK, j.getJobType());
@@ -68,7 +73,7 @@ class JobServiceStateTest {
     void enqueueForAnUnknownEndpointThrowsAndSavesNothing() {
         when(endpoints.findById(endpointId)).thenReturn(Optional.empty());
         assertThrows(EndpointNotFoundException.class, () -> service.enqueue(endpointId, JobType.POSTURE_CHECK, 0));
-        verify(jobs, never()).save(any());
+        verify(jobs, never()).insertActiveIfAbsent(any(), any(), anyInt());
     }
 
     // ---- claim ----
@@ -264,16 +269,19 @@ class JobServiceStateTest {
         when(jobs.existsByEndpoint_IdAndJobTypeAndStatusIn(eq(endpointId), eq(JobType.POSTURE_CHECK), anyCollection()))
                 .thenReturn(true);
         service.enqueueIfDue(endpointId, JobType.POSTURE_CHECK);
-        verify(jobs, never()).save(any());
+        verify(jobs, never()).insertActiveIfAbsent(any(), any(), anyInt());
     }
 
     @Test
     void enqueueIfDueOnReconnectEnqueuesAtAutomaticPriority() {
         when(jobs.existsByEndpoint_IdAndJobTypeAndStatusIn(any(), any(), anyCollection())).thenReturn(false);
-        when(endpoints.findById(endpointId)).thenReturn(Optional.of(Endpoint.builder().id(endpointId).build()));
+        Endpoint endpoint = Endpoint.builder().id(endpointId).build();
+        when(endpoints.findById(endpointId)).thenReturn(Optional.of(endpoint));
+        when(jobs.findFirstByEndpoint_IdAndJobTypeAndStatusInOrderByCreatedAtAsc(
+                eq(endpointId), eq(JobType.POSTURE_CHECK), anyCollection()))
+                .thenReturn(Optional.of(PostureJob.builder().endpoint(endpoint).jobType(JobType.POSTURE_CHECK)
+                        .status(JobStatus.QUEUED).priority(0).attemptCount(0).maxAttempts(3).build()));
         service.enqueueIfDue(endpointId, JobType.POSTURE_CHECK);
-        ArgumentCaptor<PostureJob> c = ArgumentCaptor.forClass(PostureJob.class);
-        verify(jobs).save(c.capture());
-        assertEquals(0, c.getValue().getPriority());
+        verify(jobs).insertActiveIfAbsent(endpointId, JobType.POSTURE_CHECK.name(), 0);
     }
 }

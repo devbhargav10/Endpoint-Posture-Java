@@ -124,6 +124,33 @@ class PostureJobRepositoryConcurrencyTest {
     }
 
     @Test
+    void concurrentEnqueuesForSameEndpointAndTypeReuseOneActiveJobAcrossRequests() throws Exception {
+        int requestCount = 16;
+        ExecutorService pool = Executors.newFixedThreadPool(requestCount);
+        CountDownLatch startGate = new CountDownLatch(1);
+        try {
+            List<Future<PostureJob>> futures = IntStream.range(0, requestCount)
+                    .mapToObj(i -> pool.submit(() -> {
+                        startGate.await();
+                        return jobService.enqueue(endpointAId, JobType.POSTURE_CHECK, i % 2 == 0 ? 0 : 10);
+                    })).toList();
+            startGate.countDown();
+            Set<UUID> returnedIds = futures.stream()
+                    .map(f -> {
+                        try { return f.get(15, TimeUnit.SECONDS).getId(); }
+                        catch (Exception e) { throw new RuntimeException(e); }
+                    }).collect(Collectors.toSet());
+
+            assertEquals(1, returnedIds.size());
+            assertEquals(1, jdbcTemplate.queryForObject(
+                    "SELECT count(*) FROM posture_job WHERE endpoint_id = ? AND job_type = 'POSTURE_CHECK' AND status IN ('QUEUED','RUNNING')",
+                    Integer.class, endpointAId));
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
+    @Test
     void claimedJobIsMarkedRunningWithIncrementedAttemptCount() {
         PostureJob job = jobService.enqueue(endpointAId, JobType.POSTURE_CHECK, 0);
 

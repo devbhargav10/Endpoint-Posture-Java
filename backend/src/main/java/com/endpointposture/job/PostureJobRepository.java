@@ -26,6 +26,19 @@ import java.util.UUID;
  */
 public interface PostureJobRepository extends JpaRepository<PostureJob, UUID> {
 
+        /** Inserts only when no active job exists; the partial unique index arbitrates across replicas. */
+        @Modifying
+        @Query(value = """
+                        INSERT INTO posture_job (endpoint_id, job_type, status, priority, attempt_count, max_attempts)
+                        VALUES (:endpointId, :type, 'QUEUED', :priority, 0, 3)
+                        ON CONFLICT (endpoint_id, job_type) WHERE status IN ('QUEUED', 'RUNNING') DO NOTHING
+                        """, nativeQuery = true)
+        int insertActiveIfAbsent(@Param("endpointId") UUID endpointId, @Param("type") String type,
+                                 @Param("priority") int priority);
+
+        Optional<PostureJob> findFirstByEndpoint_IdAndJobTypeAndStatusInOrderByCreatedAtAsc(
+                        UUID endpointId, JobType jobType, Collection<JobStatus> statuses);
+
         /** Locks the job and eagerly loads its endpoint for an atomic worker result transaction. */
         @Lock(LockModeType.PESSIMISTIC_WRITE)
         @Query("SELECT j FROM PostureJob j JOIN FETCH j.endpoint WHERE j.id = :id")
@@ -338,6 +351,7 @@ public interface PostureJobRepository extends JpaRepository<PostureJob, UUID> {
                            AND NOT EXISTS (SELECT 1 FROM posture_job j
                                             WHERE j.endpoint_id = e.id AND j.job_type = CAST(:type AS text)
                                               AND j.status IN ('QUEUED', 'RUNNING'))
+                        ON CONFLICT (endpoint_id, job_type) WHERE status IN ('QUEUED', 'RUNNING') DO NOTHING
                         """, nativeQuery = true)
         int enqueueForConnected(@Param("type") String type, @Param("priority") int priority);
 }

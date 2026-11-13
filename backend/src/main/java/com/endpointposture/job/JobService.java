@@ -80,19 +80,11 @@ public class JobService {
      */
     @Transactional
     public PostureJob enqueue(UUID endpointId, JobType type, int priority) {
-        Endpoint endpoint = endpointRepository.findById(endpointId)
+        endpointRepository.findById(endpointId)
                 .orElseThrow(() -> new EndpointNotFoundException(endpointId.toString()));
-
-        PostureJob job = PostureJob.builder()
-                .endpoint(endpoint)
-                .jobType(type)
-                .status(JobStatus.QUEUED)
-                .priority(priority)
-                .attemptCount(0)
-                .maxAttempts(3)
-                .build();
-
-        return jobRepository.save(job);
+        jobRepository.insertActiveIfAbsent(endpointId, type.name(), priority);
+        return jobRepository.findFirstByEndpoint_IdAndJobTypeAndStatusInOrderByCreatedAtAsc(
+                endpointId, type, List.of(JobStatus.QUEUED, JobStatus.RUNNING)).orElseThrow();
     }
 
     /**

@@ -49,6 +49,7 @@ public class RecheckScheduler {
              ORDER BY (SELECT max(j.completed_at) FROM posture_job j
                         WHERE j.endpoint_id = e.id AND j.job_type = '%1$s' AND j.status = 'COMPLETE') ASC NULLS FIRST, e.id ASC
              LIMIT ?
+            ON CONFLICT (endpoint_id, job_type) WHERE status IN ('QUEUED', 'RUNNING') DO NOTHING
             """;
 
     private static final String HARDWARE_ONLY = """
