@@ -1,46 +1,65 @@
-# Backend Release Readiness
+# Backend release readiness
 
 **Audit date:** 2026-11-16
+**Branch under verification:** `codex/application-integration`
+**Base:** `main` at `71b77a4df639d37796da3f53db74d8e463b87198`
+**State:** Local backend, worker, frontend, and live frontend/backend API checks passed. This branch has not yet been pushed; PR checks and production acceptance remain outstanding.
 
-**Integration branch:** `codex/backend-completion`
+## Implementation reviewed
 
-**Base commit:** `45de7121d0d37fd8568ed34d26302ce012be357e`
+The application baseline includes Spring Boot API and Flyway schema management, JWT login and RBAC, bounded collection APIs, worker enrollment and revocable credentials, heartbeat and lifecycle state, job leases and fencing, active-job deduplication, crash recovery, durable result receipts/replay, Cisco ISE TLS verification and hardened XML parsing, ISE action auditing/reconciliation/recovery, and a Linux profile that does not run the Windows PowerShell worker.
 
-**Verification state:** Local backend, Windows worker, frontend, Terraform, Docker, and workflow-lint checks pass. GitHub Actions results are pending the integration push/PR. No deployment or live ISE acceptance was performed.
+The ISE TLS/XML protections introduced in the PR #17 security work are present in `main`; `main` also has later durable ISE action handling. PR #17 was not blindly merged. Remote PowerShell endpoint collection remains disabled until secure endpoint credential delivery is implemented and tested.
 
-## Consolidated implementation
+## Verification results
 
-The integration branch includes the backend integration work (`codex/backend-integration`), the job-deduplication change from `feature/terraform-foundation` (V30), worker ingress protection also represented by `codex/be-05-worker-ingress`, and the worker lifecycle/result, recovery, pagination and durable ISE work. The ISE TLS/XML security changes from `codex/pr-a-ise-security` are retained in the integrated code alongside later durable action recovery. Changes from the frontend/Terraform foundation and PR6-7 deployment work were brought into the integration branch without modifying their source worktrees.
+Backend command, run from `backend/`:
 
-The backend has worker enrollment and revocable credentials, worker-scoped authorization, heartbeat and lifecycle state, lease renewal/fencing, duplicate-job protection, durable result receipts and retry behavior, crash recovery, rate-limited worker ingress, and bounded result payloads. API collection endpoints use bounded paging or explicit fleet caps. Flyway validates 29 migrations through V32, including worker authentication, recovery events, result receipts, active-job deduplication, and durable ISE operations.
+```text
+mvn -B clean verify "-Duser.timezone=UTC"
+```
 
-The Linux profile does not start the in-process Windows worker or invoke PowerShell. Windows collection runs in a separately packaged Java worker service. Remote PowerShell collection remains disabled until secure endpoint-credential delivery, rotation, audit, and isolation are designed and accepted.
+- Exit code 0; `BUILD SUCCESS`; 4m41s.
+- 84 Surefire XML reports; 595 tests; 0 failures, 0 errors, 0 skipped.
+- Docker/Testcontainers PostgreSQL 16.15 ran successfully.
+- Flyway validated and exercised 29 migrations through V32, including worker authentication/receipts, recovery, active-job deduplication, and durable ISE operations.
+- Spring Boot executable JAR was packaged at `backend/target/endpoint-posture-java-0.1.0-SNAPSHOT.jar`.
+- JPA and Hikari contexts shut down cleanly. The earlier forced Surefire shutdown issue was fixed by closing database-backed Spring test contexts after each class. This run had no forced-fork termination. I also removed the duplicate Surefire timezone `argLine` and the ineffective Hikari idle-timeout setting for the fixed-size pool; the final run did not emit either warning.
 
-## Local verification
+Windows worker command, run from `worker-runtime/`:
 
-Commands run in the integration worktree on Java 21.0.12.1 and Maven 3.9.16. `-Dmaven.repo.local=C:\Users\devbh\.m2\repository` kept dependency resolution in the existing local Maven cache.
+```text
+mvn -B clean verify "-Duser.timezone=UTC"
+```
 
-- Backend: `mvn -B clean verify "-Duser.timezone=UTC" "-Dmaven.repo.local=C:\Users\devbh\.m2\repository"` — **BUILD SUCCESS; 595 tests, 0 failures, 0 errors, 0 skipped**. Docker/Testcontainers ran PostgreSQL 16.15. Flyway validated and applied 29 migrations through V32. The Spring Boot jar was packaged.
-- Spring/Testcontainers shutdown: the first run passed but Surefire had to terminate a fork after its 30-second shutdown limit because class-cached Spring contexts retained Hikari pools after per-class PostgreSQL containers stopped. The database-backed `@SpringBootTest` classes now close their contexts after each class. The repeated full `clean verify` completed successfully without the forced-fork termination warning.
-- Windows worker: `mvn -B clean verify "-Duser.timezone=UTC" "-Dmaven.repo.local=C:\Users\devbh\.m2\repository"` — **BUILD SUCCESS; 107 tests, 0 failures, 0 errors, 1 intentionally skipped**. The skip is the non-Windows branch of `DpapiSecretProtectorTest`; the real Windows DPAPI tests and PowerShell execution tests ran on this Windows host.
-- Deployment scripts: PowerShell parser accepted all 13 `.ps1` files and the service XML parsed successfully. Install, account provisioning, ACL changes, and service-control scripts were not executed.
-- Frontend: `npm run lint`, `npm run typecheck`, `npm test`, and `npm run build` — clean lint and typecheck, **30 tests passed across 6 files**, production build generated 19 routes.
-- Terraform: Terraform 1.10.5 `fmt -recursive`, `init -backend=false`, `fmt -check -recursive`, and `validate -no-color` all passed. The AWS provider is pinned by the generated lockfile. No plan or apply was run.
-- Docker: local image build results are recorded after both image builds complete. Compose configuration is validated separately; no services are started.
+- Exit code 0; `BUILD SUCCESS`; 48.9s.
+- 107 tests; 0 failures, 0 errors, 1 skip. `DpapiSecretProtectorTest` skips its non-Windows branch; Windows DPAPI and PowerShell execution tests ran on this Windows host.
+- Shaded worker runtime JAR packaged. Maven Shade still reports expected duplicate metadata/module-info resource warnings; no test/build failure resulted.
+- Fixed an asynchronous test race by waiting for the worker handler to leave its busy state after result handoff; runtime behavior was unchanged.
 
-## Security and deployment limits
+Frontend commands, run from `frontend/`:
 
-- ISE certificate validation is mandatory. `ISE_VERIFY_TLS` defaults to `true`; disabling verification fails startup. A configured truststore is supported; otherwise the JVM default CA trust is used. Secure XML parsing rejects DTDs and external entities. Tests cover TLS certificate rejection and parser hardening, but no live Cisco ISE host, production CA chain, hostname, or deployed ISE version was tested.
-- Worker/IP rate buckets are local to each backend replica. A production reverse proxy or gateway still needs a shared ingress ceiling and correct client-IP trust configuration. Request-size limits should also be confirmed at the deployed proxy.
-- Backend-to-Windows worker enrollment, heartbeat, lease, result receipt/replay, revocation, and crash recovery still need an end-to-end run against the chosen Linux deployment. Windows service installation and upgrade/recovery acceptance are environment-specific.
-- Remote endpoint PowerShell collection must stay disabled until the credential delivery design has been accepted and implemented.
-- The Terraform foundation currently covers VPC/subnets/security groups/private PostgreSQL only. It does not deploy API/frontend compute, a public TLS edge, a Windows worker fleet, site VPN/routes, workload IAM, or monitoring. Broad egress remains until destination CIDRs and VPC endpoints are decided. No AWS account was accessed.
-- Production JWT/admin/application database secrets, TLS termination, state-bucket bootstrap, backup/restore, monitoring, alerting, and incident procedures require environment-specific review.
+- `npm run lint` — exit 0.
+- `npm run typecheck` — exit 0.
+- `npm run test` — 6 files and 30 tests passed.
+- `npm run build` — exit 0; Next.js production build generated 19 routes.
+- Added `npm run test:integration`, which uses the real frontend API client against the packaged backend: login/token, dashboard summary, paged endpoints, and admin users. Local live run passed 1/1 test against disposable PostgreSQL and backend.
 
-## Remaining release gates
+The CI backend job now starts the packaged application against its PostgreSQL service and runs this API integration check. GitHub Actions for this new branch have not run yet. The frontend CI job uses Node 22; local frontend checks passed with the installed Node runtime, which emitted a Node engine warning for one dependency.
 
-1. Confirm the backend, worker, frontend, and Terraform GitHub Actions runs after the integration PR is pushed.
-2. Test the deployed ISE certificate chain and hostname with the production trust material and target ISE version.
-3. Perform authenticated Windows-worker-to-Linux-backend acceptance for enrollment, heartbeats, lease renewal/fencing, result retry, revocation, and crash recovery.
-4. Complete secure endpoint-credential delivery before enabling remote PowerShell collection.
-5. Approve the runtime, ingress/client-IP policy, secret provisioning, Terraform state bootstrap, network egress, database backup/restore, and monitoring designs before deployment.
+## Operational and security limits
+
+- Production must supply unique JWT, admin, database, and (if enabled) ISE credentials through an approved secret store. Configure the deployment TLS certificate/trust chain and review database migrations before release.
+- ISE TLS certificate validation is mandatory; disabling verification fails startup. A configured truststore is supported, with JVM default trust otherwise. Secure XML parsing rejects DTDs and external entities. No live ISE system, production CA chain, hostname, or deployed ISE version was tested.
+- Worker/IP rate buckets are local to each backend replica. A production gateway still needs a shared ingress ceiling and correct client-IP trust configuration. Confirm request-size limits at the deployed proxy.
+- Backend-to-Windows worker enrollment, heartbeat, lease renewal/fencing, receipt replay, revocation, and recovery still need acceptance against the selected Linux deployment. Windows service installation/upgrade and DPAPI persistence across a real SCM restart remain host-specific acceptance.
+- Remote PowerShell collection must remain disabled until protected endpoint credential delivery, rotation, audit, and isolation are implemented and accepted. Do not put endpoint credentials in job arguments or service XML.
+- No paid AWS infrastructure was provisioned. Terraform remains subject to extraction into its own repository. Production networking, workload IAM, state bootstrap, database backup/restore, monitoring, alerting, and incident procedures require environment-specific review.
+
+## Release gates
+
+1. Push the verified branch and confirm required GitHub Actions checks on its pull request.
+2. Test the deployed ISE certificate chain/hostname with approved trust material and the target ISE version.
+3. Perform authenticated Windows-worker to Linux-backend acceptance for enrollment, heartbeat, lease/fencing, retry, revocation, and crash recovery.
+4. Complete and test secure endpoint credential delivery before enabling remote PowerShell collection.
+5. Approve deployment secret provisioning, gateway ingress/client-IP policy, state bootstrap, network egress, database backup/restore, and monitoring.

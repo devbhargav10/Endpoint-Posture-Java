@@ -42,6 +42,40 @@ jobs:
           POSTURE_API_KEY: ci-test-agent-key
         run: mvn -B clean verify "-Duser.timezone=UTC"
 
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend dependencies for API contract verification
+        working-directory: frontend
+        run: npm ci
+      - name: Start packaged backend for frontend API integration
+        working-directory: backend
+        env:
+          DB_URL: jdbc:postgresql://localhost:5434/endpoint_posture
+          DB_USERNAME: ep_app
+          DB_PASSWORD: ci_test_password
+          JWT_SECRET: ci-test-jwt-secret-at-least-256-bits-long-placeholder-value
+          SEED_ADMIN_PASSWORD: ci-test-admin-password
+          POSTURE_API_KEY: ci-test-agent-key
+        run: |
+          java -Duser.timezone=UTC -jar target/endpoint-posture-java-0.1.0-SNAPSHOT.jar > "$RUNNER_TEMP/backend.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/backend.pid"
+          for attempt in {1..60}; do
+            if curl --fail --silent http://127.0.0.1:8090/actuator/health >/dev/null; then exit 0; fi
+            sleep 2
+          done
+          cat "$RUNNER_TEMP/backend.log"
+          exit 1
+      - name: Verify frontend API against running backend
+        working-directory: frontend
+        env:
+          BACKEND_API_URL: http://127.0.0.1:8090
+          BACKEND_API_USERNAME: admin
+          BACKEND_API_PASSWORD: ci-test-admin-password
+        run: npm run test:integration
+
   worker-runtime:
     name: Windows worker — Maven build, tests & DPAPI
     runs-on: windows-latest

@@ -107,7 +107,9 @@ class PowerShellJobHandlerFailureTest {
         assertEquals(1, handoff.size());
         assertTrue(handler.isBusy(), "pending result blocks claims but is not a failure block");
         assertNotNull(handoff.poll());
-        assertFalse(handler.isBusy());
+        long idleDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
+        while (handler.isBusy() && System.nanoTime() < idleDeadline) Thread.sleep(10);
+        assertFalse(handler.isBusy(), "handler should become available after the accepted result drains");
         handler.close();
     }
 
