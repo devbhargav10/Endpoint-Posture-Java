@@ -1,87 +1,107 @@
 # Endpoint Posture & Compliance Platform
 
-![ENDPOINT POSTURE project banner](./assets/endpoint-posture-banner.svg)
-
-An **agentless endpoint visibility, posture and compliance platform** that works alongside **Cisco ISE**.
-
-It discovers active endpoints through Cisco ISE, remotely collects Windows posture, hardware, network-experience and connection-indicator data, stores the history in PostgreSQL, and gives an operator a dashboard to investigate and take controlled ISE actions.
-
-> **Observe → Collect → Store → Review → Act**
-
-Cisco ISE stays the network-enforcement authority. The platform never turns a collected result into an ISE action by itself. See `DECISIONS.md` (D3) for how bulk sharing fits that rule.
-
----
-
-## What it does
-
-* **Endpoint discovery**: polls ISE sessions as a set difference (appeared, still present, missing), tracks MAC/IP and connect/disconnect (with a grace period against flapping), keeps a session history per device.
-* **Posture**: Windows Firewall, listening ports with a reachability probe, installed applications judged against a versioned required/blocked policy, processes, resources, OS.
-* **Hardware health**: CPU, memory, storage, battery, BIOS, 7-day hardware events, recommendations, warranty (from an uploaded CSV), trend charts.
-* **Endpoint 360** (on demand): network diagnostics run on the endpoint (gateway, DNS, TCP 443, traceroute) with a transparent score, and connection-based security indicators (possible lateral movement, beaconing). Indicators are evidence for a person to review and never trigger enforcement.
-* **ISE actions**: Share Posture, Restrict, Clear, each a separate operator action with its own role requirement and its own audit row, success or failure. A fleet page shows the latest enforcement state per device. A standing ISE pxGrid Direct feed (X1) allows scheduled polling under an admin-approved sharing rule.
-
-ISE actions are recorded in PostgreSQL before calling ISE. Active identical requests are coalesced. Safe connection failures retry with exponential backoff, bounded by `ISE_OPERATION_MAX_ATTEMPTS` and `ISE_OPERATION_RETRY_MAX_SECONDS`; set the initial delay with `ISE_OPERATION_RETRY_BASE_SECONDS`. Request read timeouts and abandoned in-flight operations are never replayed automatically. The recovery worker reads ISE endpoint posture attributes and ANC policy state where available, then resolves only matching or definitively mismatching state. CoA reauthentication and failed/inconclusive readbacks require administrator review: verify the endpoint in ISE, list cases with `GET /api/v1/ise/operations/reconciliation-required`, then call `POST /api/v1/ise/operations/{id}/resolve` with `resolution` (`SUCCEEDED` or `FAILED`) and `supportingDetails`. Automated and operator resolutions are recorded with the durable operation.
-* **Automation**: worker pool, automatic rechecks (posture every 4 h, hardware every 24 h, rate limited per sweep), stale-job recovery, job, inventory and 90-day evidence retention, daily compliance rollup.
-* **Access control**: roles `ADMIN`, `OPERATOR`, `ANALYST`, `VIEWER` enforced on the server; user management; account lockout; per-IP login rate limit.
-* **Operations**: System Health page, Prometheus metrics (`/actuator/prometheus`, admin only), security headers, CI with frontend image publishing, a scale simulator.
+A dashboard and API for endpoint posture, Cisco ISE session visibility, and operator-approved ISE actions. Cisco ISE remains the enforcement authority; the platform does not automatically enforce from a collected result.
 
 ## Architecture
 
 ```text
-              Cisco ISE
-      MNT session list / ERS actions
-                 │
-                 ▼
-   Spring Boot API  ◄──── HTTP/JSON + agent key ────  PowerShell agents
-   (jobs, ingest,                                      (CIM / WinRM / DCOM)
-    ISE actions)                                              │
-        │                                                     ▼
-        ▼                                             Windows endpoints
-   PostgreSQL 16
-        │
-        ▼
-   Next.js dashboard
+Cisco ISE ──TLS──► Linux Spring Boot API ──► PostgreSQL 16
+                         ▲      ▲
+                         │      └── Next.js dashboard (via API routes)
+                         │ HTTPS, enrolled worker identity, leases and receipts
+                   Windows Java worker service
+                         │
+                         └── PowerShell collection remains disabled until secure
+                             endpoint-credential delivery is designed and accepted
 ```
 
-Observation (ingest) and enforcement (ISE actions) live in separate controllers and services, so recording a result can never fall through into an ISE call.
+The Linux backend profile does not launch `powershell.exe` or run the local worker pool. Windows workers are a separate Java 21 service using individually enrolled, revocable credentials and DPAPI-protected local state. Do not enable remote PowerShell collection: the endpoint credential delivery channel is not implemented.
 
-## Technology
+## Components
 
-| Layer | Choice |
-| --- | --- |
-| Backend | Java 21, Spring Boot 3.5.16, Maven, Spring Security + JWT, Flyway |
-| Database | PostgreSQL 16 with `pg_trgm` (migrations V1 to V24; V5 to V7 intentionally absent) |
-| Collection | PowerShell 5+, Windows CIM / WinRM / DCOM |
-| Network | Cisco ISE MNT (sessions) and ERS (actions) |
-| Frontend | Next.js 16, React 19, TypeScript, Tailwind CSS 3, Vitest |
-| Delivery | Docker Compose (Postgres, Adminer, frontend), GitHub Actions CI (tests, frontend image to GHCR) |
+| Component | Stack | Current state |
+| --- | --- | --- |
+| Backend | Java 21, Spring Boot 3.5, Spring Security/JWT, JPA, Flyway | Worker lifecycle, lease fencing, result receipts/retries, job recovery, bounded APIs, ISE TLS/XML hardening and durable ISE actions are integrated. Migrations validate through V32. |
+| Database | PostgreSQL 16 | Flyway applies 29 ordered migrations through V32 (V5–V7 are intentionally absent). |
+| Frontend | Next.js 16, React 19, TypeScript, Tailwind, Vitest | Dashboard, login, role-aware navigation and API client. Run lint, typecheck, tests and build as documented below. |
+| Worker | Windows Java 21 runtime | Separately packaged; service installation and real Windows SCM/DPAPI acceptance remain environment-specific. |
+| Infrastructure | Terraform, AWS provider 6.62 | VPC/subnet/security-group and private RDS foundation only. It does not create compute, ALB/TLS ingress, runner fleet, IAM workload roles, VPN/site routes, or monitoring. |
 
-## Run it
+## Run locally with Docker Compose
+
+PowerShell example that generates local-only values in the current shell (nothing is written to source control):
 
 ```powershell
-docker compose up -d                       # Postgres + Adminer
-.\scripts\Save-PostureCredential.ps1       # one time, same Windows account that runs the backend
-cd backend ; .\start-dev.ps1               # API :8090, Swagger at /swagger-ui.html (dev profile only)
-cd ..\frontend ; npm install ; npm run dev # http://localhost:3000
+function New-LocalSecret {
+  $bytes = New-Object byte[] 32
+  $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
+  $rng.GetBytes($bytes)
+  [Convert]::ToBase64String($bytes)
+}
+$env:POSTGRES_PASSWORD = New-LocalSecret
+$env:JWT_SECRET = New-LocalSecret
+$env:SEED_ADMIN_PASSWORD = New-LocalSecret
+$env:POSTURE_API_KEY = New-LocalSecret
+docker compose up --build -d
 ```
 
-Details, configuration and troubleshooting: `Doc/PROJECT_COMPLETE_GUIDE.md` and `Doc/HANDOFF.md`. Scale simulator: `scripts/sim/README.md`. Production steps: `Doc/PRODUCTION_CHECKLIST.md`.
+Open the dashboard at `http://localhost:3000`, the backend at `http://localhost:8090`, and Adminer at `http://localhost:8081`. The Compose backend uses the `linux` Spring profile and runs database migrations on startup. The Windows worker is not started by Compose. `docker compose down` keeps the named database volume; do not use `-v` if you need to preserve local database data.
 
-## Documentation map
+For a Windows-hosted backend development profile, see `backend/README.md` and `Doc/BACKEND_BEGINNER_GUIDE.md`. Do not place real secrets in application YAML, shell history, Terraform examples, or Git.
 
-| File | Purpose |
+## Configuration
+
+| Variable | Purpose |
 | --- | --- |
-| `Doc/PROJECT_COMPLETE_GUIDE.md` | Full reference: flows, database, packages, API, config, agents, frontend, security. The authority when documents disagree. |
-| `Doc/DECISIONS.md` | Decisions taken and open: scope, deployment, ISE sharing, scale. |
-| `Doc/FEATURE_ROADMAP.md` | What is done and what is left, in order. |
-| `Doc/ROADMAP.md` | System at completion, scale analysis and measurements, infrastructure phases. |
-| `Doc/HANDOFF.md` | Start here when picking the project up: run, verify, known traps. |
-| `Doc/PRODUCTION_CHECKLIST.md` | What to do before real deployment. |
-| `deploy/README.md` | Windows service deployment kit (WinSW xml, scripts, Caddy proxy). |
-| `scripts/sim/README.md` | How to run and read the 20,000-session simulation. |
+| `DB_URL`, `DB_USERNAME`, `DB_PASSWORD` | PostgreSQL JDBC connection and application credentials. Compose uses service host `postgres`; local defaults are in `backend/src/main/resources/application.yml`. |
+| `JWT_SECRET` | Signing key for dashboard tokens; use a random value with at least 256 bits of entropy. |
+| `SEED_ADMIN_USER`, `SEED_ADMIN_PASSWORD` | Initial admin seed; use an environment-specific password and rotate after setup. |
+| `POSTURE_API_KEY` | Agent ingestion credential. Worker keys are enrolled and rotated individually through the admin API. |
+| `ISE_BASE_URL`, `ISE_USERNAME`, `ISE_PASSWORD` | Cisco ISE API settings. `ISE_VERIFY_TLS` defaults to `true`; provide the approved CA truststore through `ISE_TRUSTSTORE_PATH`, `ISE_TRUSTSTORE_PASSWORD`, and `ISE_TRUSTSTORE_TYPE`. |
+| `APP_SCHEDULING_ENABLED` | Background schedule switch; defaults to `true` outside the test configuration. |
+| `WORKER_AUTH_IP_*`, `WORKER_UNAUTH_IP_*`, `WORKER_RATE_*` | Per-backend-replica pre-authentication and worker rate limits. Apply additional shared limits at the production ingress. |
+| `BACKEND_URL` | Frontend Docker build argument for Next.js API rewrites; Compose sets `http://backend:8090` on its private network. |
 
-## Status
+## Verification commands
 
-Backend, agents and dashboard are built through Endpoint 360, warranty, lockout, metrics, scale fixes S1 to S12, paged inventory (S13), 90-day evidence retention (D10; S11 partitioning not needed at this window), standing ISE sharing feed (X1, DECISIONS D3 option B; still UNVERIFIED live against real ISE; pxGrid Direct limits not yet checked) and the first hardening pass. Left: live verification (L1), the post-S12 simulation re-run (L2), decisions D2/D5/D7, deployment and backend container. Application remediation is **out of scope**. See `FEATURE_ROADMAP.md`.
+```powershell
+# Backend, including PostgreSQL Testcontainers; Docker must be available.
+cd backend
+mvn -B clean verify "-Duser.timezone=UTC"
 
-**The platform provides visibility and intelligence. Cisco ISE remains the enforcement layer.**
+# Frontend
+cd ..\frontend
+npm ci
+npm run lint
+npm run typecheck
+npm test
+npm run build
+
+# Windows worker runtime
+cd ..\worker-runtime
+mvn -B clean verify "-Duser.timezone=UTC"
+
+# Terraform (Terraform 1.10+; validation only, no apply)
+cd ..
+terraform fmt -check -recursive terraform
+terraform -chdir=terraform init -backend=false
+terraform -chdir=terraform validate
+```
+
+GitHub Actions runs backend, Windows worker, frontend and Terraform checks. CI builds both Docker images; it does not publish them to a registry. No AWS resources are deployed by these checks.
+
+## Infrastructure and production acceptance
+
+Terraform examples are placeholders, not deployment-approved account, CIDR, sizing or region values. The foundation creates a two-AZ VPC and private encrypted PostgreSQL RDS. It deliberately does not deploy compute or the network paths required for ISE and endpoint sites. Egress remains broad until destinations and VPC endpoints are decided. Terraform state requires a separately bootstrapped encrypted, access-restricted S3 backend. The API database user, application secrets, IAM roles, TLS edge and operations monitoring still need approved designs.
+
+Before production, validate the deployed ISE certificate chain and hostname, perform Windows SCM/DPAPI restart and worker result-retry acceptance, confirm ingress limits and observability, and define backup/restore and secret rotation. See `Doc/BACKEND_RELEASE_READINESS.md`, `deploy/WORKER-DEPLOYMENT.md`, `terraform/README.md`, `Doc/PRODUCTION_CHECKLIST.md`, and `Doc/PROJECT_ARCHITECTURE.md`.
+
+## Documentation
+
+- `Doc/BACKEND_BEGINNER_GUIDE.md` — API/backend setup and behavior.
+- `Doc/DATABASE_BEGINNER_GUIDE.md` — schema and migrations.
+- `Doc/FRONTEND_BEGINNER_GUIDE.md` — dashboard setup and frontend structure.
+- `Doc/PROJECT_ARCHITECTURE.md` — system and trust boundaries.
+- `Doc/BACKEND_RELEASE_READINESS.md` — test evidence, limitations and acceptance gates.
+- `deploy/WORKER-DEPLOYMENT.md` — Windows service staging, identity, ACL, DPAPI and acceptance.
+- `terraform/README.md` — infrastructure scope, local validation and deployment prerequisites.

@@ -1,0 +1,45 @@
+variable "name_prefix" {
+  type = string
+}
+variable "vpc_id" {
+  type = string
+}
+variable "data_subnet_ids" {
+  type = list(string)
+}
+variable "application_security_group_id" {
+  type = string
+}
+variable "database_name" {
+  type = string
+}
+variable "database_username" {
+  type = string
+}
+variable "engine_version" {
+  type = string
+}
+variable "instance_class" {
+  type = string
+}
+variable "allocated_storage" {
+  type = number
+}
+variable "max_allocated_storage" {
+  type = number
+}
+variable "backup_retention_days" {
+  type = number
+}
+variable "multi_az" {
+  type = bool
+}
+variable "deletion_protection" {
+  type = bool
+}
+variable "skip_final_snapshot" {
+  type = bool
+}
+variable "tags" {
+  type = map(string)
+}
