@@ -13,7 +13,7 @@ spring:
       maximum-pool-size: ${DB_POOL_SIZE:10}
       connection-timeout: 15000   # fail in 15 s, not 52 s, so a stall is visible quickly
       keepalive-time: 120000      # ping idle connections every 2 min
-      idle-timeout: 300000        # must stay below max-lifetime
+      # Fixed-size pool default makes idle-timeout ineffective; retain max-lifetime and keepalive.
       max-lifetime: 900000        # retire connections after 15 min, before anything upstream does
 
   # S12: this is the REAL key for the @Scheduled thread pool. The old
