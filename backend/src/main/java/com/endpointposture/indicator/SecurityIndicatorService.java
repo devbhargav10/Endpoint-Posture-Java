@@ -1,6 +1,7 @@
 package com.endpointposture.indicator;
 
 import com.endpointposture.endpoint.Endpoint;
+import com.endpointposture.api.ApiPaging;
 import com.endpointposture.endpoint.EndpointService;
 import com.endpointposture.indicator.dto.SecurityIndicatorResponse;
 import com.endpointposture.indicator.dto.SecurityReportRequest;
@@ -103,7 +104,13 @@ public class SecurityIndicatorService {
 
     @Transactional(readOnly = true)
     public List<SecurityIndicatorResponse> history(UUID endpointId) {
-        return repository.findByEndpointIdOrderByCollectedAtDesc(endpointId).stream().map(this::toResponse).toList();
+        return history(endpointId, 0, ApiPaging.DEFAULT_SIZE);
+    }
+
+    @Transactional(readOnly = true)
+    public List<SecurityIndicatorResponse> history(UUID endpointId, int page, int size) {
+        return repository.findByEndpointIdOrderByCollectedAtDescIdDesc(endpointId, ApiPaging.of(page, size))
+                .stream().map(this::toResponse).toList();
     }
 
     @Transactional(readOnly = true)

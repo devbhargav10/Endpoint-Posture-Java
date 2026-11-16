@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 import java.util.Map;
+import org.springframework.web.bind.annotation.RequestParam;
 
 /**
  * Application policy API. Reading needs any valid token; changing it is
@@ -39,8 +40,9 @@ public class PolicyController {
 
     @Operation(summary = "Every policy version, newest first")
     @GetMapping("/history")
-    public List<PolicySnapshot> history() {
-        return service.history();
+    public List<PolicySnapshot> history(@RequestParam(defaultValue = "0") int page,
+                                        @RequestParam(defaultValue = "100") int size) {
+        return service.history(page, size);
     }
 
     @Operation(summary = "Replace the active policy with a new version",

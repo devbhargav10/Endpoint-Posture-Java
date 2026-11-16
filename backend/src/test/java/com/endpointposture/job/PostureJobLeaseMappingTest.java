@@ -6,6 +6,7 @@ import com.endpointposture.endpoint.EndpointRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.PostgreSQLContainer;
@@ -25,6 +26,7 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 @Testcontainers
 @SpringBootTest(classes = EndpointPostureApplication.class)
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 class PostureJobLeaseMappingTest {
 
     @Container

@@ -8,6 +8,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import org.springframework.web.bind.annotation.RequestParam;
 
 /**
  * Exposes fleet-wide ISE enforcement state derived from the audit log.
@@ -26,7 +27,9 @@ public class IseActionStateController {
 
     @Operation(summary = "Latest RESTRICT or CLEAR_RESTRICTION action per endpoint")
     @GetMapping("/state")
-    public List<IseActionStateResponse> getEnforcementStates() {
-        return service.getLatestEnforcementStates();
+    public List<IseActionStateResponse> getEnforcementStates(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "100") int size) {
+        return service.getLatestEnforcementStates(page, size);
     }
 }

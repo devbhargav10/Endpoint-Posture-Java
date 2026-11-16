@@ -1,6 +1,7 @@
 package com.endpointposture.hardware;
 
 import com.endpointposture.hardware.dto.HardwareHealthResponse;
+import com.endpointposture.api.ApiPaging;
 import com.endpointposture.warranty.WarrantyService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -124,7 +125,12 @@ public HardwareHealthResponse recordFailure(UUID endpointId, UUID jobId, String 
 
     @Transactional(readOnly = true)
     public List<HardwareHealthResponse> getHistoryForEndpoint(UUID endpointId) {
-        return healthRepository.findByEndpointIdOrderByCollectedAtDesc(endpointId)
+        return getHistoryForEndpoint(endpointId, 0, ApiPaging.DEFAULT_SIZE);
+    }
+
+    @Transactional(readOnly = true)
+    public List<HardwareHealthResponse> getHistoryForEndpoint(UUID endpointId, int page, int size) {
+        return healthRepository.findByEndpointIdOrderByCollectedAtDescIdDesc(endpointId, ApiPaging.of(page, size))
                 .stream().map(this::toResponse).toList();
     }
 

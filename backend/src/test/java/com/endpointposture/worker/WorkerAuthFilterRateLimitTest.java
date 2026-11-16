@@ -15,8 +15,7 @@ class WorkerAuthFilterRateLimitTest {
 
     @Test
     void missingCredentialsStillConsumeUnauthenticatedIpBudget() throws Exception {
-        WorkerAuthFilter filter = new WorkerAuthFilter(mock(WorkerRegistryService.class), mock(WorkerAuditService.class),
-                1, 0, 60, 100, 100, 60);
+        WorkerAuthFilter filter = filter(mock(WorkerRegistryService.class), 100, 100, 1, 0, 100);
         FilterChain chain = mock(FilterChain.class);
 
         filter.doFilter(request(null), new MockHttpServletResponse(), chain);
@@ -28,6 +27,23 @@ class WorkerAuthFilterRateLimitTest {
     }
 
     @Test
+    void credentialHashLookupsAreCappedBeforeDatabaseAuthentication() throws Exception {
+        WorkerRegistryService registry = mock(WorkerRegistryService.class);
+        String unknownKey = WorkerCredentials.KEY_PREFIX + "workerkey000000000000000000000001";
+        WorkerAuthFilter filter = filter(registry, 1, 0, 100, 100, 100);
+        when(registry.authenticate(unknownKey)).thenReturn(new WorkerRegistryService.AuthResult(
+                WorkerRegistryService.Status.UNKNOWN_KEY, null, null, null));
+        FilterChain chain = mock(FilterChain.class);
+
+        filter.doFilter(request(unknownKey), new MockHttpServletResponse(), chain);
+        MockHttpServletResponse limited = new MockHttpServletResponse();
+        filter.doFilter(request(unknownKey), limited, chain);
+
+        assertEquals(429, limited.getStatus());
+        verify(registry, times(1)).authenticate(unknownKey);
+    }
+
+    @Test
     void authenticatedWorkersBehindSameIpHaveIndependentBudgets() throws Exception {
         WorkerRegistryService registry = mock(WorkerRegistryService.class);
         when(registry.authenticate(anyString())).thenAnswer(call -> {
@@ -35,8 +51,7 @@ class WorkerAuthFilterRateLimitTest {
             UUID id = UUID.nameUUIDFromBytes(key.getBytes());
             return new WorkerRegistryService.AuthResult(WorkerRegistryService.Status.OK, id, key, "shard-a");
         });
-        WorkerAuthFilter filter = new WorkerAuthFilter(registry, mock(WorkerAuditService.class),
-                10, 0, 60, 1, 0, 60);
+        WorkerAuthFilter filter = filter(registry, 100, 100, 10, 0, 1);
         FilterChain chain = mock(FilterChain.class);
 
         MockHttpServletResponse first = new MockHttpServletResponse();
@@ -52,10 +67,34 @@ class WorkerAuthFilterRateLimitTest {
         verify(chain, times(2)).doFilter(any(), any());
     }
 
+    private static WorkerAuthFilter filter(
+            WorkerRegistryService registry,
+            int authenticationCapacity,
+            int authenticationRefill,
+            int unauthenticatedCapacity,
+            int unauthenticatedRefill,
+            int workerCapacity) {
+        return new WorkerAuthFilter(
+                registry,
+                mock(WorkerAuditService.class),
+                authenticationCapacity,
+                authenticationRefill,
+                60,
+                unauthenticatedCapacity,
+                unauthenticatedRefill,
+                60,
+                workerCapacity,
+                100,
+                60);
+    }
+
     private static MockHttpServletRequest request(String key) {
         MockHttpServletRequest request = new MockHttpServletRequest("POST", PATH);
+        request.setRequestURI(PATH);
         request.setRemoteAddr("192.0.2.10");
-        if (key != null) request.addHeader(WorkerAuthFilter.HEADER, key);
+        if (key != null) {
+            request.addHeader(WorkerAuthFilter.HEADER, key);
+        }
         return request;
     }
 }

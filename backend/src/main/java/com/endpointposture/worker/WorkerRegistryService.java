@@ -132,7 +132,7 @@ public class WorkerRegistryService {
     public List<WorkerView> list(int requestedLimit){
         int limit=Math.max(1,Math.min(requestedLimit,MAX_LIST_LIMIT));
         Instant now=Instant.now();
-        return jdbc.query("SELECT id,name,shard,enabled,created_at,last_seen_at,revoked_at,created_by FROM worker_registry ORDER BY created_at DESC LIMIT ?",
+        return jdbc.query("SELECT id,name,shard,enabled,created_at,last_seen_at,revoked_at,created_by FROM worker_registry ORDER BY created_at DESC, id DESC LIMIT ?",
           (rs,i)->{
             boolean enabled=rs.getBoolean("enabled");Instant seen=inst(rs.getTimestamp("last_seen_at"));
             return new WorkerView(rs.getObject("id",UUID.class),rs.getString("name"),rs.getString("shard"),enabled,

@@ -51,6 +51,8 @@ logging:
     com.endpointposture.security: INFO
 
 app:
+  scheduling:
+    enabled: ${APP_SCHEDULING_ENABLED:true}
   jwt:
     secret: ${JWT_SECRET}
     expiration-minutes: 480
@@ -85,10 +87,15 @@ app:
     fleet-list-max-endpoints: 2000
 
   workers:
+    # Coarse pre-authentication ceiling bounds credential-hash lookups per source IP.
+    # Authenticated workers also have independent per-worker buckets below.
     # The unauthenticated bucket only charges missing/invalid credentials so workers
     # behind shared NAT addresses use independent authenticated worker buckets.
     # Buckets are per backend replica; enforce cluster-wide ceilings at the ingress proxy.
     ingress:
+      authentication-ip-capacity: ${WORKER_AUTH_IP_CAPACITY:6000}
+      authentication-ip-refill-tokens: ${WORKER_AUTH_IP_REFILL_TOKENS:6000}
+      authentication-ip-refill-duration-seconds: ${WORKER_AUTH_IP_REFILL_SECONDS:60}
       unauthenticated-ip-capacity: ${WORKER_UNAUTH_IP_CAPACITY:120}
       unauthenticated-ip-refill-tokens: ${WORKER_UNAUTH_IP_REFILL_TOKENS:120}
       unauthenticated-ip-refill-duration-seconds: ${WORKER_UNAUTH_IP_REFILL_SECONDS:60}

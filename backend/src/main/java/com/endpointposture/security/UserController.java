@@ -18,6 +18,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import org.springframework.web.bind.annotation.RequestParam;
 
 /** User management. ADMIN only, enforced both in SecurityConfig and here. */
 @RestController
@@ -52,8 +53,9 @@ public class UserController {
 
     @Operation(summary = "List users")
     @GetMapping
-    public List<UserView> list() {
-        return service.list().stream().map(UserView::of).toList();
+    public List<UserView> list(@RequestParam(defaultValue = "0") int page,
+                               @RequestParam(defaultValue = "100") int size) {
+        return service.list(page, size).stream().map(UserView::of).toList();
     }
 
     @Operation(summary = "Create a user")

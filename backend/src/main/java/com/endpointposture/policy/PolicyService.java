@@ -1,5 +1,6 @@
 package com.endpointposture.policy;
 
+import com.endpointposture.api.ApiPaging;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -58,7 +59,13 @@ public class PolicyService {
     /** @return every policy version, newest first */
     @Transactional(readOnly = true)
     public List<PolicySnapshot> history() {
-        return policies.findAllByOrderByVersionDesc().stream().map(this::toSnapshot).toList();
+        return history(0, ApiPaging.DEFAULT_SIZE);
+    }
+
+    @Transactional(readOnly = true)
+    public List<PolicySnapshot> history(int page, int size) {
+        return policies.findAllByOrderByVersionDesc(ApiPaging.of(page, size)).stream()
+                .map(this::toSnapshot).toList();
     }
 
     /**

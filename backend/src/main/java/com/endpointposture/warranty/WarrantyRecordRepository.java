@@ -7,6 +7,7 @@ import org.springframework.data.repository.query.Param;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import org.springframework.data.domain.Pageable;
 
 /** Data access for {@link WarrantyRecord}. */
 public interface WarrantyRecordRepository extends JpaRepository<WarrantyRecord, UUID> {
@@ -20,7 +21,7 @@ public interface WarrantyRecordRepository extends JpaRepository<WarrantyRecord, 
 
     List<WarrantyRecord> findBySerialNumberOrderByUploadedAtDesc(String serialNumber);
 
-    List<WarrantyRecord> findAllByOrderByUploadedAtDesc();
+    List<WarrantyRecord> findAllByOrderByUploadedAtDescIdDesc(Pageable pageable);
 
     @Query("SELECT COUNT(DISTINCT w.serialNumber) FROM WarrantyRecord w")
     long countDistinctSerials();

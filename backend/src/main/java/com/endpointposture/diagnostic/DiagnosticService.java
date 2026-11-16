@@ -2,6 +2,7 @@ package com.endpointposture.diagnostic;
 
 import com.endpointposture.diagnostic.dto.DiagnosticReportRequest;
 import com.endpointposture.diagnostic.dto.DiagnosticResponse;
+import com.endpointposture.api.ApiPaging;
 import com.endpointposture.endpoint.Endpoint;
 import com.endpointposture.endpoint.EndpointService;
 import org.springframework.stereotype.Service;
@@ -125,7 +126,12 @@ public class DiagnosticService {
 
     @Transactional(readOnly = true)
     public List<DiagnosticResponse> history(UUID endpointId) {
-        return repository.findByEndpointIdOrderByCollectedAtDesc(endpointId).stream()
+        return history(endpointId, 0, ApiPaging.DEFAULT_SIZE);
+    }
+
+    @Transactional(readOnly = true)
+    public List<DiagnosticResponse> history(UUID endpointId, int page, int size) {
+        return repository.findByEndpointIdOrderByCollectedAtDescIdDesc(endpointId, ApiPaging.of(page, size)).stream()
                 .map(this::toResponse).toList();
     }
 

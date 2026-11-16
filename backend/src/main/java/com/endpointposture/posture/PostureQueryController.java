@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
 import java.util.UUID;
+import org.springframework.web.bind.annotation.RequestParam;
 
 /**
  * The read side of posture: an endpoint's assessment history.
@@ -33,8 +34,10 @@ public class PostureQueryController {
      */
     @Operation(summary = "Assessment history for an endpoint, newest first")
     @GetMapping
-    public List<AssessmentResponse> history(@PathVariable UUID id) {
-        return service.getHistoryForEndpoint(id);
+    public List<AssessmentResponse> history(@PathVariable UUID id,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "100") int size) {
+        return service.getHistoryForEndpoint(id, page, size);
     }
 
     /**

@@ -7,8 +7,6 @@ import jakarta.servlet.ServletInputStream;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletRequestWrapper;
 import jakarta.servlet.http.HttpServletResponse;
-import org.springframework.core.Ordered;
-import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
@@ -18,15 +16,16 @@ import java.io.IOException;
 
 /** Caps worker result bodies before Jackson parses them, including chunked requests. */
 @Component
-@Order(Ordered.HIGHEST_PRECEDENCE)
 public class WorkerResultBodyLimitFilter extends OncePerRequestFilter {
     public static final int MAX_REQUEST_BYTES = 1_200_000;
-    private static final String WORKER_PATH = "/api/v1/workers/";
+    private static final String RESULT_PATH_PREFIX = "/api/v1/workers/jobs/";
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
+        String uri = request.getRequestURI();
         return !"POST".equalsIgnoreCase(request.getMethod())
-                || !request.getRequestURI().startsWith(WORKER_PATH);
+                || !uri.startsWith(RESULT_PATH_PREFIX)
+                || !uri.endsWith("/result");
     }
 
     @Override
@@ -48,15 +47,37 @@ public class WorkerResultBodyLimitFilter extends OncePerRequestFilter {
         }
         byte[] bytes = body.toByteArray();
         chain.doFilter(new HttpServletRequestWrapper(request) {
-            @Override public int getContentLength() { return bytes.length; }
-            @Override public long getContentLengthLong() { return bytes.length; }
-            @Override public ServletInputStream getInputStream() {
+            @Override
+            public int getContentLength() {
+                return bytes.length;
+            }
+
+            @Override
+            public long getContentLengthLong() {
+                return bytes.length;
+            }
+
+            @Override
+            public ServletInputStream getInputStream() {
                 ByteArrayInputStream input = new ByteArrayInputStream(bytes);
                 return new ServletInputStream() {
-                    @Override public int read() { return input.read(); }
-                    @Override public boolean isFinished() { return input.available() == 0; }
-                    @Override public boolean isReady() { return true; }
-                    @Override public void setReadListener(ReadListener listener) {
+                    @Override
+                    public int read() {
+                        return input.read();
+                    }
+
+                    @Override
+                    public boolean isFinished() {
+                        return input.available() == 0;
+                    }
+
+                    @Override
+                    public boolean isReady() {
+                        return true;
+                    }
+
+                    @Override
+                    public void setReadListener(ReadListener listener) {
                         throw new UnsupportedOperationException("Async body reads are not supported");
                     }
                 };

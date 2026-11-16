@@ -11,25 +11,19 @@ import java.util.UUID;
  */
 public interface IseActionAuditRepository extends JpaRepository<IseActionAudit, UUID> {
 
-    /** @return one endpoint's ISE action history, newest first */
-    List<IseActionAudit> findAllByEndpointIdOrderByOccurredAtDesc(UUID endpointId);
-
-    /** @return the full ISE action history across every endpoint, newest first */
-    List<IseActionAudit> findAllByOrderByOccurredAtDesc();
-
-    List<IseActionAudit> findAllByEndpointIdOrderByOccurredAtDesc(UUID endpointId,
+    List<IseActionAudit> findAllByEndpointIdOrderByOccurredAtDescIdDesc(UUID endpointId,
             org.springframework.data.domain.Pageable page);
 
-    List<IseActionAudit> findAllByOrderByOccurredAtDesc(org.springframework.data.domain.Pageable page);
+    List<IseActionAudit> findAllByOrderByOccurredAtDescIdDesc(org.springframework.data.domain.Pageable page);
 
-    /**
-     * Finds the latest RESTRICT or CLEAR_RESTRICTION audit row per endpoint.
-     */
     @org.springframework.data.jpa.repository.Query(value = """
             SELECT DISTINCT ON (endpoint_id) *
             FROM ise_action_audit
             WHERE action_type IN ('RESTRICT', 'CLEAR_RESTRICTION')
-            ORDER BY endpoint_id, occurred_at DESC
+            ORDER BY endpoint_id, occurred_at DESC, id DESC
+            LIMIT :limit OFFSET :offset
             """, nativeQuery = true)
-    List<IseActionAudit> findLatestEnforcementActionsPerEndpoint();
+    List<IseActionAudit> findLatestEnforcementActionsPerEndpoint(
+            @org.springframework.data.repository.query.Param("limit") int limit,
+            @org.springframework.data.repository.query.Param("offset") long offset);
 }

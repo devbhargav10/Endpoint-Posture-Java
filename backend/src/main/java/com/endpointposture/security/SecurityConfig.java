@@ -2,6 +2,7 @@ package com.endpointposture.security;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.CommandLineRunner;
+import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -12,8 +13,10 @@ import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.access.intercept.AuthorizationFilter;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import com.endpointposture.worker.WorkerAuthFilter;
+import com.endpointposture.worker.WorkerResultBodyLimitFilter;
 
 @Configuration
 @EnableWebSecurity
@@ -25,6 +28,7 @@ public class SecurityConfig {
     private final IseFeedAuthFilter iseFeedAuthFilter;
     private final SecurityHeadersFilter securityHeadersFilter;
     private final WorkerAuthFilter workerAuthFilter;
+    private final WorkerResultBodyLimitFilter workerResultBodyLimitFilter;
     private final boolean docsPublic;
 
     public SecurityConfig(
@@ -33,13 +37,22 @@ public class SecurityConfig {
             IseFeedAuthFilter iseFeedAuthFilter,
             SecurityHeadersFilter securityHeadersFilter,
             WorkerAuthFilter workerAuthFilter,
+            WorkerResultBodyLimitFilter workerResultBodyLimitFilter,
             @Value("${app.docs.public:false}") boolean docsPublic) {
         this.jwtAuthFilter = jwtAuthFilter;
         this.postureApiKeyFilter = postureApiKeyFilter;
         this.iseFeedAuthFilter = iseFeedAuthFilter;
         this.securityHeadersFilter = securityHeadersFilter;
         this.workerAuthFilter = workerAuthFilter;
+        this.workerResultBodyLimitFilter = workerResultBodyLimitFilter;
         this.docsPublic = docsPublic;
+    }
+
+    @Bean
+    public FilterRegistrationBean<WorkerResultBodyLimitFilter> workerResultBodyLimitFilterRegistration() {
+        FilterRegistrationBean<WorkerResultBodyLimitFilter> registration = new FilterRegistrationBean<>(workerResultBodyLimitFilter);
+        registration.setEnabled(false);
+        return registration;
     }
 
     @Bean
@@ -114,7 +127,9 @@ public class SecurityConfig {
                 .addFilterBefore(
                         iseFeedAuthFilter,
                         UsernamePasswordAuthenticationFilter.class)
-                .addFilterAfter(workerAuthFilter, JwtAuthFilter.class);
+                .addFilterAfter(workerAuthFilter, JwtAuthFilter.class)
+                // Run after authorization so unauthenticated callers cannot make us buffer large bodies.
+                .addFilterAfter(workerResultBodyLimitFilter, AuthorizationFilter.class);
 
         return http.build();
     }

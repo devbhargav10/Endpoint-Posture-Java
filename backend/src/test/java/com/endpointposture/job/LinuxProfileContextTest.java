@@ -5,6 +5,7 @@ import com.endpointposture.system.SystemHealthService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.context.ApplicationContext;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -28,6 +29,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @Testcontainers
 @SpringBootTest(classes = EndpointPostureApplication.class)
 @ActiveProfiles("linux")
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 class LinuxProfileContextTest {
 
     @Container

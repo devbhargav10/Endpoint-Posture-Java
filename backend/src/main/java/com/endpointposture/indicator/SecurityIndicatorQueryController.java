@@ -24,8 +24,10 @@ public class SecurityIndicatorQueryController {
 
     @Operation(summary = "Security-indicator history for an endpoint, newest first")
     @GetMapping
-    public List<SecurityIndicatorResponse> history(@PathVariable UUID id) {
-        return service.history(id);
+    public List<SecurityIndicatorResponse> history(@PathVariable UUID id,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "100") int size) {
+        return service.history(id, page, size);
     }
 
     @Operation(summary = "Latest run", description = "204 when never scanned.")

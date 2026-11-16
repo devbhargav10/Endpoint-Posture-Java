@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors;
@@ -26,6 +27,7 @@ import static org.junit.jupiter.api.Assertions.*;
 @Testcontainers
 @SpringBootTest(classes = EndpointPostureApplication.class)
 @AutoConfigureMockMvc
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 class WorkerAuthenticationFlowTest {
 
     @Container
@@ -129,6 +131,24 @@ class WorkerAuthenticationFlowTest {
         return jdbc.queryForObject("SELECT status FROM posture_job WHERE id = ?", String.class, id);
     }
 
+    @Test
+    void oversizedResultBodiesAreRejectedOnlyAfterWorkerAuthorization() throws Exception {
+        String path = "/api/v1/workers/jobs/" + UUID.randomUUID() + "/result";
+        String oversized = "x".repeat(WorkerResultBodyLimitFilter.MAX_REQUEST_BYTES + 1);
+        int unauthenticated = mvc.perform(MockMvcRequestBuilders.post(path)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(oversized))
+                .andReturn().getResponse().getStatus();
+        assertTrue(unauthenticated == 401 || unauthenticated == 403);
+
+        String key = enrollOk(adminCreatesToken("body-limit", "site-a")).get("apiKey").asText();
+        int authenticated = mvc.perform(MockMvcRequestBuilders.post(path)
+                        .header(WorkerAuthFilter.HEADER, key)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(oversized))
+                .andReturn().getResponse().getStatus();
+        assertEquals(413, authenticated);
+    }
     @Test
     void enrollAuthenticateClaimOwnShardOnlyAndCompleteWithTheFencingToken() throws Exception {
         UUID ep = endpoint("DD:00:00:00:01:01", "10.1.0.1");
