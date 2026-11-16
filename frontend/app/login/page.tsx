@@ -101,7 +101,7 @@ export default function LoginPage() {
                 autoFocus
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
-                className="w-full rounded-lg border border-border bg-base px-3 py-2 text-xs text-ink outline-none transition focus:border-accent"
+                className="min-h-11 w-full rounded-md border border-border bg-base px-3 py-2 text-sm text-ink outline-none transition focus:border-accent"
               />
             </div>
 
@@ -120,14 +120,13 @@ export default function LoginPage() {
                   onKeyUp={(e) => setCapsLock(e.getModifierState("CapsLock"))}
                   onKeyDown={(e) => setCapsLock(e.getModifierState("CapsLock"))}
                   onBlur={() => setCapsLock(false)}
-                  className="w-full rounded-lg border border-border bg-base py-2 pl-3 pr-9 text-xs text-ink outline-none transition focus:border-accent"
+                  className="min-h-11 w-full rounded-md border border-border bg-base py-2 pl-3 pr-11 text-sm text-ink outline-none transition focus:border-accent"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword((v) => !v)}
                   aria-label={showPassword ? "Hide password" : "Show password"}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted transition hover:text-ink"
-                  tabIndex={-1}
+                  className="absolute right-1 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-md text-muted transition hover:text-ink"
                 >
                   {showPassword ? <EyeOff size={14} /> : <Eye size={14} />}
                 </button>

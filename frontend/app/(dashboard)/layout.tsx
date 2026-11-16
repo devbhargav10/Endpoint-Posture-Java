@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { api, getToken, clearToken } from "@/lib/api";
+import { getToken, clearToken } from "@/lib/api";
 import { clearCurrentUser } from "@/lib/auth";
 import { isTokenValid } from "@/lib/session";
 import { IseStatusProvider } from "@/lib/IseStatusContext";
@@ -10,10 +10,13 @@ import { Sidebar } from "@/components/layout/Sidebar";
 import { Topbar } from "@/components/layout/Topbar";
 import { IseBanner } from "@/components/ui/IseBanner";
 import { TabStatus } from "@/components/layout/TabStatus";
+import { LoadingState } from "@/components/ui/AsyncState";
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const [ready, setReady] = useState(false);
+  const [navigationOpen, setNavigationOpen] = useState(false);
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     const token = getToken();
@@ -23,20 +26,25 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       router.replace("/login");
       return;
     }
-    api
-      .iseStatus()
-      .then(() => setReady(true))
-      .catch(() => {
-        clearToken();
-        clearCurrentUser();
-        router.replace("/login");
-      });
+    setReady(true);
   }, [router]);
+
+  useEffect(() => {
+    if (!navigationOpen) return;
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setNavigationOpen(false);
+        menuButtonRef.current?.focus();
+      }
+    }
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [navigationOpen]);
 
   if (!ready) {
     return (
-      <div className="flex h-screen items-center justify-center text-xs text-muted">
-        Connecting to backend…
+      <div className="flex min-h-screen items-center justify-center">
+        <LoadingState label="Checking your session…" />
       </div>
     );
   }
@@ -44,12 +52,19 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   return (
     <IseStatusProvider>
       <TabStatus />
-      <div className="flex h-screen overflow-hidden">
-        <Sidebar />
+      <a href="#main-content" className="sr-only z-[100] rounded bg-panel p-3 text-ink focus:not-sr-only focus:fixed focus:left-3 focus:top-3">
+        Skip to main content
+      </a>
+      <div className="flex min-h-screen md:h-screen md:overflow-hidden">
+        <Sidebar mobileOpen={navigationOpen} onClose={() => setNavigationOpen(false)} />
         <div className="flex min-w-0 flex-1 flex-col">
-          <Topbar />
+          <Topbar
+            navigationOpen={navigationOpen}
+            onToggleNavigation={() => setNavigationOpen((open) => !open)}
+            menuButtonRef={menuButtonRef}
+          />
           <IseBanner />
-          <main className="min-w-0 flex-1 overflow-y-auto overflow-x-hidden p-8">{children}</main>
+          <main id="main-content" tabIndex={-1} className="min-w-0 flex-1 overflow-x-hidden p-4 sm:p-6 lg:overflow-y-auto lg:p-8">{children}</main>
         </div>
       </div>
     </IseStatusProvider>

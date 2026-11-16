@@ -2,41 +2,45 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Dark: warm graphite + vibrant teal. Light: crisp warm paper + deep teal. */
+/* Endpoint Posture tokens. Dark stays the default until the theme decision is approved. */
 :root {
   --color-base: 15 17 16;
   --color-panel: 22 25 24;
   --color-panel2: 18 21 20;
-  --color-border: 38 43 41;
-  --color-ink: 240 242 239;
-  --color-muted: 148 156 151;
-  --color-accent: 45 212 191;
-  --color-accent2: 94 234 212;
-  --color-warn: 245 158 11;
+  --color-border: 48 55 52;
+  --color-ink: 240 243 241;
+  --color-muted: 170 181 175;
+  --color-accent: 53 198 181;
+  --color-accent2: 98 217 203;
+  --color-warn: 242 190 85;
   --color-medium: 234 179 8;
-  --color-bad: 248 113 113;
-  --color-good: 52 211 153;
+  --color-bad: 255 115 125;
+  --color-good: 85 214 139;
+  --color-info: 119 174 255;
+  --color-neutral: 170 181 175;
   --font-sans: "Segoe UI", Inter, -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
   --font-mono: "Cascadia Code", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
 }
 
 .light {
-  --color-base: 246 245 241;
+  --color-base: 246 247 245;
   --color-panel: 255 255 255;
-  --color-panel2: 240 238 233;
-  --color-border: 226 222 214;
-  --color-ink: 24 28 26;
-  --color-muted: 104 112 108;
-  --color-accent: 13 148 136;
-  --color-accent2: 15 118 110;
-  --color-warn: 194 106 5;
-  --color-medium: 161 98 7;
-  --color-bad: 220 38 38;
-  --color-good: 16 185 129;
+  --color-panel2: 238 241 239;
+  --color-border: 216 222 218;
+  --color-ink: 24 32 28;
+  --color-muted: 82 97 90;
+  --color-accent: 8 126 117;
+  --color-accent2: 6 102 95;
+  --color-warn: 138 87 0;
+  --color-medium: 138 87 0;
+  --color-bad: 180 35 45;
+  --color-good: 22 112 68;
+  --color-info: 36 94 168;
+  --color-neutral: 82 97 90;
 }
 
 html, body {
-  height: 100%;
+  min-height: 100%;
 }
 
 body {
@@ -66,7 +70,7 @@ body {
 }
 
 .panel {
-  @apply rounded-xl border border-border bg-panel shadow-sm transition-all duration-150;
+  @apply rounded-lg border border-border bg-panel transition-colors duration-150;
 }
 
 .panel-hover {
@@ -75,6 +79,26 @@ body {
 
 .glass-panel {
   @apply rounded-xl border border-border/80 backdrop-blur-md;
+}
+
+:focus-visible {
+  outline: 2px solid rgb(var(--color-accent));
+  outline-offset: 2px;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 @keyframes pulse-ring {
