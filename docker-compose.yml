@@ -6,9 +6,9 @@ services:
     environment:
       POSTGRES_DB: endpoint_posture
       POSTGRES_USER: ep_app
-      POSTGRES_PASSWORD: devpassword123
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the current shell}
     ports:
-      - "5434:5432"   # off 5432/5433 in case either is already taken on your machine
+      - "5434:5432"
     volumes:
       - ep_pg_data:/var/lib/postgresql/data
     healthcheck:
@@ -16,6 +16,26 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+
+  backend:
+    build:
+      context: ./backend
+    container_name: ep-backend
+    restart: unless-stopped
+    environment:
+      SPRING_PROFILES_ACTIVE: linux
+      DB_URL: jdbc:postgresql://postgres:5432/endpoint_posture?tcpKeepAlive=true
+      DB_USERNAME: ep_app
+      DB_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the current shell}
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in the current shell}
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:?Set SEED_ADMIN_PASSWORD in the current shell}
+      POSTURE_API_KEY: ${POSTURE_API_KEY:?Set POSTURE_API_KEY in the current shell}
+      ISE_VERIFY_TLS: "true"
+    ports:
+      - "8090:8090"
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   adminer:
     image: adminer:4
@@ -26,20 +46,17 @@ services:
     depends_on:
       - postgres
 
-  # Optional: `docker compose up -d --build frontend`. The backend runs on the
-  # Windows host (it needs PowerShell, CIM/DCOM and DPAPI), so the frontend
-  # reaches it through host.docker.internal.
   frontend:
     build:
       context: ./frontend
       args:
-        BACKEND_URL: http://host.docker.internal:8090
+        BACKEND_URL: http://backend:8090
     container_name: ep-frontend
     restart: unless-stopped
     ports:
       - "3000:3000"
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+    depends_on:
+      - backend
 
 volumes:
   ep_pg_data:

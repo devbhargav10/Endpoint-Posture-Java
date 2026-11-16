@@ -6,6 +6,7 @@ import com.endpointposture.endpoint.EndpointRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.PageRequest;
+import com.endpointposture.endpoint.dto.PageResponse;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -80,19 +81,11 @@ public class JobService {
      */
     @Transactional
     public PostureJob enqueue(UUID endpointId, JobType type, int priority) {
-        Endpoint endpoint = endpointRepository.findById(endpointId)
+        endpointRepository.findById(endpointId)
                 .orElseThrow(() -> new EndpointNotFoundException(endpointId.toString()));
-
-        PostureJob job = PostureJob.builder()
-                .endpoint(endpoint)
-                .jobType(type)
-                .status(JobStatus.QUEUED)
-                .priority(priority)
-                .attemptCount(0)
-                .maxAttempts(3)
-                .build();
-
-        return jobRepository.save(job);
+        jobRepository.insertActiveIfAbsent(endpointId, type.name(), priority);
+        return jobRepository.findFirstByEndpoint_IdAndJobTypeAndStatusInOrderByCreatedAtAsc(
+                endpointId, type, List.of(JobStatus.QUEUED, JobStatus.RUNNING)).orElseThrow();
     }
 
     /**
@@ -104,27 +97,175 @@ public class JobService {
     }
 
     /**
-     * Claims and locks the next eligible job in one transaction (SELECT ... FOR
-     * UPDATE SKIP LOCKED, then flip to RUNNING).
+     * Claims the next eligible job for the local in-process worker pool.
+     * Local jobs do not hold a remote-worker lease.
      *
      * @return the job now marked RUNNING, or empty if nothing is eligible
      */
     @Transactional
     public Optional<PostureJob> claimNextJob() {
-        Optional<PostureJob> claimed = jobRepository.findNextClaimable();
+        return claim(null, null, null);
+    }
+
+    /**
+     * Claims the next eligible job for a remote worker and records its lease.
+     * The row lock acquired by {@code findNextClaimable()} is held until this
+     * transaction commits, making the status change and lease assignment atomic.
+     * The incremented {@code attemptCount} is the fencing token for this attempt;
+     * remote completion and failure validate that token and the active lease.
+     *
+     * @param workerId stable identity of the claiming worker; must not be blank
+     * @param lease    how long the lease lasts from now; must be positive
+     * @return the leased job, or empty if no job is eligible
+     * @throws IllegalArgumentException if the worker ID is blank or the lease is not positive
+     */
+    @Transactional
+    public Optional<PostureJob> claimNextJob(String workerId, Duration lease) {
+        if (workerId == null || workerId.isBlank()) {
+            throw new IllegalArgumentException("workerId is required");
+        }
+        if (lease == null || lease.isZero() || lease.isNegative()) {
+            throw new IllegalArgumentException("lease must be positive");
+        }
+        return claim(workerId.trim(), lease, null);
+    }
+
+    /** Claims only jobs assigned to the worker's authenticated shard. */
+    @Transactional
+    public Optional<PostureJob> claimNextJobInShard(String workerId, String shard, Duration lease) {
+        if (workerId == null || workerId.isBlank()) {
+            throw new IllegalArgumentException("workerId is required");
+        }
+        if (shard == null || shard.isBlank()) {
+            throw new IllegalArgumentException("shard is required");
+        }
+        if (lease == null || lease.isZero() || lease.isNegative()) {
+            throw new IllegalArgumentException("lease must be positive");
+        }
+        return claim(workerId.trim(), lease, shard.trim());
+    }
+
+    private Optional<PostureJob> claim(String workerId, Duration lease, String shard) {
+        Optional<PostureJob> claimed = shard == null
+                ? jobRepository.findNextClaimable()
+                : jobRepository.findNextClaimableInShard(shard);
 
         claimed.ifPresent(job -> {
+            Instant now = Instant.now();
             job.setStatus(JobStatus.RUNNING);
-            job.setStartedAt(Instant.now());
+            job.setStartedAt(now);
             job.setAttemptCount(job.getAttemptCount() + 1);
+            job.setClaimedBy(workerId);
+            job.setLeaseExpiresAt(lease == null ? null : now.plus(lease));
             jobRepository.save(job);
 
-            // Force the lazy Endpoint proxy to resolve NOW, while the transaction is
-            // open; JobWorker reads job.getEndpoint() after this method returns.
+            // Resolve the lazy Endpoint while the transaction is open. JobWorker
+            // reads the endpoint after this method returns.
             job.getEndpoint().getMacAddress();
         });
 
         return claimed;
+    }
+
+    /**
+     * Completes a remote-worker attempt only while the submitting worker still
+     * owns the current, unexpired lease. The repository enforces all ownership
+     * and fencing predicates in one atomic UPDATE.
+     *
+     * @return true when this attempt completed the job; false when it is stale,
+     *         expired, superseded, or the job is no longer RUNNING
+     */
+    @Transactional
+    public boolean completeFenced(UUID jobId, String workerId, int attempt) {
+        validateFencedAttempt(jobId, workerId, attempt);
+        return jobRepository.completeFenced(jobId, workerId.trim(), attempt) == 1;
+    }
+
+    /**
+     * Records a remote-worker failure only while the worker still owns the
+     * current, unexpired lease. Accepted failures follow the existing retry
+     * policy and release the lease before the job can be claimed again.
+     *
+     * @return true when this attempt's failure was accepted; false when stale,
+     *         expired, superseded, or no longer RUNNING
+     */
+    @Transactional
+    public boolean failFenced(UUID jobId, String workerId, int attempt, String errorMessage) {
+        validateFencedAttempt(jobId, workerId, attempt);
+        return jobRepository.failFenced(jobId, workerId.trim(), attempt, errorMessage) == 1;
+    }
+
+    /**
+     * Extends a remote worker's lease by {@code extension} from now. Only the
+     * owning worker, for the current attempt, while the lease is unexpired.
+     *
+     * @return the new lease expiry, or empty if the attempt is stale, not owned,
+     *         expired or no longer RUNNING
+     */
+    @Transactional
+    public Optional<Instant> renewLease(UUID jobId, String workerId, int attempt, Duration extension) {
+        validateFencedAttempt(jobId, workerId, attempt);
+        if (extension == null || extension.isZero() || extension.isNegative()) {
+            throw new IllegalArgumentException("extension must be positive");
+        }
+        if (jobRepository.renewLease(jobId, workerId.trim(), attempt, extension.toSeconds()) != 1) {
+            return Optional.empty();
+        }
+        return jobRepository.findById(jobId).map(PostureJob::getLeaseExpiresAt);
+    }
+
+    /** Stale-sweep failure for a remote-leased attempt; only while the lease is expired. */
+    @Transactional
+    public boolean failExpiredLeaseAttempt(UUID jobId, int attempt, String reason) {
+        if (jobId == null || attempt < 1) {
+            throw new IllegalArgumentException("jobId and a positive attempt are required");
+        }
+        return jobRepository.failExpiredLeaseAttempt(jobId, attempt, reason) == 1;
+    }
+
+    /** Fails a job only while its recorded worker is still administratively revoked. */
+    @Transactional
+    public boolean failRevokedWorkerAttempt(UUID jobId, int attempt, String reason) {
+        if (jobId == null || attempt < 1) {
+            throw new IllegalArgumentException("jobId and a positive attempt are required");
+        }
+        return jobRepository.failRevokedWorkerAttempt(jobId, attempt, reason) == 1;
+    }
+
+    private void validateFencedAttempt(UUID jobId, String workerId, int attempt) {
+        if (jobId == null) {
+            throw new IllegalArgumentException("jobId is required");
+        }
+        if (workerId == null || workerId.isBlank()) {
+            throw new IllegalArgumentException("workerId is required");
+        }
+        if (attempt < 1) {
+            throw new IllegalArgumentException("attempt must be positive");
+        }
+    }
+
+    /**
+     * Completes an embedded-worker attempt only if it is still the current
+     * RUNNING attempt. Local claims have no remote worker identity or lease.
+     */
+    @Transactional
+    public boolean completeAttempt(UUID jobId, int attempt) {
+        if (jobId == null || attempt < 1) {
+            throw new IllegalArgumentException("jobId and a positive attempt are required");
+        }
+        return jobRepository.completeRunningAttempt(jobId, attempt) == 1;
+    }
+
+    /**
+     * Fails an embedded-worker or stale-sweep attempt only if it is still the
+     * current RUNNING attempt. Remote workers must use failFenced instead.
+     */
+    @Transactional
+    public boolean failAttempt(UUID jobId, int attempt, String reason) {
+        if (jobId == null || attempt < 1) {
+            throw new IllegalArgumentException("jobId and a positive attempt are required");
+        }
+        return jobRepository.failRunningAttempt(jobId, attempt, reason) == 1;
     }
 
     /** Marks a job finished successfully. Unknown IDs are ignored. */
@@ -134,6 +275,8 @@ public class JobService {
             job.setStatus(JobStatus.COMPLETE);
             job.setCompletedAt(Instant.now());
             job.setErrorMessage(null);
+            job.setClaimedBy(null);
+            job.setLeaseExpiresAt(null);
             jobRepository.save(job);
         });
     }
@@ -151,29 +294,17 @@ public class JobService {
                 job.setStatus(JobStatus.QUEUED);
                 long backoffMinutes = Math.min(job.getAttemptCount(), 15);
                 job.setNextAttemptAt(Instant.now().plus(backoffMinutes, ChronoUnit.MINUTES));
+                job.setCompletedAt(null);
             } else {
                 job.setStatus(JobStatus.FAILED);
+                job.setNextAttemptAt(null);
                 job.setCompletedAt(Instant.now());
             }
 
+            job.setClaimedBy(null);
+            job.setLeaseExpiresAt(null);
             jobRepository.save(job);
         });
-    }
-
-    /**
-     * Like {@link #markFailed} but only acts if the job is still RUNNING, so a
-     * job that finished in the meantime is never flipped back to QUEUED.
-     *
-     * @return true if the job was still RUNNING and has now been failed/requeued
-     */
-    @Transactional
-    public boolean markFailedIfRunning(UUID jobId, String errorMessage) {
-        boolean running = jobRepository.findById(jobId)
-                .map(j -> j.getStatus() == JobStatus.RUNNING).orElse(false);
-        if (!running)
-            return false;
-        markFailed(jobId, errorMessage);
-        return true;
     }
 
     /**
@@ -194,6 +325,22 @@ public class JobService {
     @Transactional(readOnly = true)
     public List<PostureJob> listForEndpoint(UUID endpointId, int limit) {
         return jobRepository.findRecentForEndpoint(endpointId, PageRequest.of(0, limit));
+    }
+
+    @Transactional(readOnly = true)
+    public PageResponse<PostureJob> pageRecent(int page, int size) {
+        int safePage = Math.max(0, page);
+        int safeSize = Math.max(1, Math.min(size, 200));
+        return new PageResponse<>(jobRepository.findRecent(PageRequest.of(safePage, safeSize)),
+                jobRepository.count(), safePage, safeSize);
+    }
+
+    @Transactional(readOnly = true)
+    public PageResponse<PostureJob> pageForEndpoint(UUID endpointId, int page, int size) {
+        int safePage = Math.max(0, page);
+        int safeSize = Math.max(1, Math.min(size, 200));
+        return new PageResponse<>(jobRepository.findRecentForEndpoint(endpointId, PageRequest.of(safePage, safeSize)),
+                jobRepository.countByEndpoint_Id(endpointId), safePage, safeSize);
     }
 
     /**

@@ -153,7 +153,6 @@ export default function JobsPage() {
   useEffect(() => {
     loadJobs();
     loadQueue();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {

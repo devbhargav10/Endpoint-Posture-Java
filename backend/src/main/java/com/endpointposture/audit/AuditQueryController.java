@@ -36,7 +36,7 @@ public class AuditQueryController {
             @RequestParam(defaultValue = "500") int limit) {
         var page = org.springframework.data.domain.PageRequest.of(0, Math.max(1, Math.min(limit, 2000)));
         return endpointId != null
-                ? repository.findAllByEndpointIdOrderByOccurredAtDesc(endpointId, page)
-                : repository.findAllByOrderByOccurredAtDesc(page);
+                ? repository.findAllByEndpointIdOrderByOccurredAtDescIdDesc(endpointId, page)
+                : repository.findAllByOrderByOccurredAtDescIdDesc(page);
     }
 }

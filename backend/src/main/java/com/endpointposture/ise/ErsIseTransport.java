@@ -1,6 +1,8 @@
 package com.endpointposture.ise;
 
 import com.endpointposture.ise.config.IseProperties;
+import com.endpointposture.ise.config.IseHttpClientFactory;
+import com.endpointposture.security.SecureXml;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
@@ -8,21 +10,16 @@ import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
+import org.springframework.web.client.ResourceAccessException;
+import org.springframework.web.client.HttpStatusCodeException;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.NodeList;
 
-import javax.net.ssl.SSLContext;
-import javax.net.ssl.TrustManager;
-import javax.net.ssl.X509TrustManager;
-import javax.xml.parsers.DocumentBuilderFactory;
-import java.io.ByteArrayInputStream;
 import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
-import java.security.SecureRandom;
-import java.security.cert.X509Certificate;
-import java.time.Duration;
 import java.time.Instant;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.HashMap;
@@ -66,39 +63,12 @@ public class ErsIseTransport implements IseTransport {
         }
 
         RestClient.Builder builder = RestClient.builder().baseUrl(props.getBaseUrl());
-        if (!props.isVerifyTls()) {
-            // Lab/self-signed ISE deployments commonly present a
-            // certificate the JVM's default trust store won't recognize.
-            // Matches the Python side's urllib3.disable_warnings(...) +
-            // verify=False behavior - a deliberate, configured choice
-            // (app.ise.verify-tls), not an accident.
-            builder = builder.requestFactory(new JdkClientHttpRequestFactory(insecureHttpClient()));
-        }
+        HttpClient httpClient = IseHttpClientFactory.create(props);
+        if (httpClient == null) httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(15)).build();
+        JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(httpClient);
+        requestFactory.setReadTimeout(Duration.ofMillis(Math.max(1, props.getRequestTimeoutMs())));
+        builder = builder.requestFactory(requestFactory);
         this.restClient = builder.build();
-    }
-
-    private HttpClient insecureHttpClient() {
-        try {
-            TrustManager[] trustAll = new TrustManager[] { new X509TrustManager() {
-                public void checkClientTrusted(X509Certificate[] chain, String authType) {
-                }
-
-                public void checkServerTrusted(X509Certificate[] chain, String authType) {
-                }
-
-                public X509Certificate[] getAcceptedIssuers() {
-                    return new X509Certificate[0];
-                }
-            } };
-            SSLContext ctx = SSLContext.getInstance("TLS");
-            ctx.init(null, trustAll, new SecureRandom());
-            return HttpClient.newBuilder()
-                    .sslContext(ctx)
-                    .connectTimeout(Duration.ofSeconds(15))
-                    .build();
-        } catch (Exception e) {
-            throw new IllegalStateException("Could not build an insecure HTTP client for app.ise.verify-tls=false", e);
-        }
     }
 
     @Override
@@ -187,8 +157,8 @@ public class ErsIseTransport implements IseTransport {
             }
             return new IseResult(true, "Posture shared with ISE as " + status);
         } catch (Exception e) {
-            log.warn("publishPosture failed for {}: {}", mac, e.getMessage());
-            return new IseResult(false, e.getMessage());
+            log.warn("publishPosture failed for {} ({})", mac, e.getClass().getSimpleName());
+            return failure(e);
         }
     }
 
@@ -202,9 +172,143 @@ public class ErsIseTransport implements IseTransport {
                     ? applyAnc(mac, action, policy)
                     : applyAttributeAndReauth(mac, action);
         } catch (Exception e) {
-            log.warn("publishEnforcement({}) failed for {}: {}", action, mac, e.getMessage());
-            return new IseResult(false, e.getMessage());
+            log.warn("publishEnforcement({}) failed for {} ({})", action, mac, e.getClass().getSimpleName());
+            return failure(e);
         }
+    }
+
+    private IseResult failure(Exception e) {
+        boolean ambiguous = isAmbiguous(e);
+        boolean retryable = isConnectFailure(e);
+        String detail;
+        if (e instanceof HttpStatusCodeException statusError) {
+            detail = "ISE returned HTTP " + statusError.getStatusCode().value();
+        } else if (ambiguous) {
+            detail = "ISE outcome is unknown; reconciliation is required";
+        } else if (retryable) {
+            detail = "Could not connect to ISE; the operation will retry";
+        } else {
+            detail = "ISE request failed";
+        }
+        return new IseResult(false, detail, ambiguous, retryable);
+    }
+
+    private boolean isAmbiguous(Exception e) {
+        if (e instanceof HttpStatusCodeException statusError && statusError.getStatusCode().is5xxServerError())
+            return true;
+        if (!(e instanceof ResourceAccessException)) return false;
+        for (Throwable cause = e; cause != null; cause = cause.getCause()) {
+            if (cause instanceof java.net.http.HttpConnectTimeoutException
+                    || cause instanceof java.net.ConnectException
+                    || cause instanceof java.net.UnknownHostException
+                    || cause instanceof javax.net.ssl.SSLException) return false;
+            if (cause instanceof java.net.SocketTimeoutException || cause instanceof java.net.http.HttpTimeoutException)
+                return true;
+        }
+        // Connection reset/EOF after a request may mean ISE acted but its response was lost.
+        return true;
+    }
+
+    private boolean isConnectFailure(Exception e) {
+        if (e instanceof HttpStatusCodeException) return false;
+        for (Throwable cause = e; cause != null; cause = cause.getCause()) {
+            if (cause instanceof java.net.ConnectException || cause instanceof java.net.NoRouteToHostException
+                    || cause instanceof java.net.UnknownHostException
+                    || cause instanceof java.net.http.HttpConnectTimeoutException) return true;
+        }
+        return false;
+    }
+
+    @Override
+    public String effectivePolicy(String requestedPolicy) {
+        if (props.getEnforcementMode() != IseProperties.Mode.ANC) return requestedPolicy;
+        return requestedPolicy == null || requestedPolicy.isBlank() ? props.getAncPolicyName() : requestedPolicy;
+    }
+
+    @Override
+    @SuppressWarnings("unchecked")
+    public IseReconciliationResult reconcile(IseOperation operation) {
+        if (!props.isConfigured()) return inconclusive("ISE is not configured");
+        try {
+            if ("SHARE_POSTURE".equals(operation.actionType())) {
+                String id = endpointIdFor(operation.macAddress());
+                if (id == null) return failed("ISE endpoint has no shared posture attributes");
+                Map<String, Object> response = restClient.get().uri("/ers/config/endpoint/{id}", id)
+                        .header(HttpHeaders.AUTHORIZATION, basicAuthHeader)
+                        .header(HttpHeaders.ACCEPT, "application/json")
+                        .retrieve().body(Map.class);
+                Map<String, Object> endpoint = nestedMap(response, "ERSEndPoint");
+                Map<String, Object> custom = nestedMap(endpoint, "customAttributes");
+                Map<String, Object> attrs = nestedMap(custom, "customAttributes");
+                boolean matches = operation.postureStatus().equals(stringValue(attrs.get("ExternalComplianceStatus")))
+                        && operation.postureDetails().equals(stringValue(attrs.get("PostureFailedChecks")));
+                return matches ? succeeded("ISE endpoint posture attributes match the intended operation")
+                        : failed("ISE endpoint posture attributes do not match the intended operation");
+            }
+
+            if (props.getEnforcementMode() != IseProperties.Mode.ANC)
+                return inconclusive("CoA reauthentication has no persistent endpoint state to read back");
+
+            EnforcementAction action = "RESTRICT".equals(operation.actionType())
+                    ? EnforcementAction.RESTRICT : EnforcementAction.CLEAR;
+            Map<String, Object> response = restClient.get()
+                    .uri("/ers/config/ancendpoint?filter=macAddress.EQ.{mac}&size=100", operation.macAddress())
+                    .header(HttpHeaders.AUTHORIZATION, basicAuthHeader)
+                    .header(HttpHeaders.ACCEPT, "application/json")
+                    .retrieve().body(Map.class);
+            Object searchResult = response == null ? null : response.get("SearchResult");
+            Object resourceValue = searchResult instanceof Map<?, ?> search ? search.get("resources") : null;
+            if (!(resourceValue instanceof List<?> resources))
+                return inconclusive("ISE ANC endpoint lookup returned an unreadable response");
+            if (resources.isEmpty()) return action == EnforcementAction.CLEAR
+                    ? succeeded("ISE confirms no ANC policy is applied")
+                    : failed("ISE confirms no ANC policy is applied");
+            if (resources.size() > 1)
+                return inconclusive("ISE returned multiple ANC resources for the endpoint");
+
+            Object first = resources.get(0);
+            if (!(first instanceof Map<?, ?> resource) || resource.get("id") == null)
+                return inconclusive("ISE ANC endpoint lookup did not return a resource ID");
+            Map<String, Object> detail = restClient.get()
+                    .uri("/ers/config/ancendpoint/{id}", resource.get("id"))
+                    .header(HttpHeaders.AUTHORIZATION, basicAuthHeader)
+                    .header(HttpHeaders.ACCEPT, "application/json")
+                    .retrieve().body(Map.class);
+            Map<String, Object> anc = nestedMap(detail, "ERSAncEndpoint");
+            String policyName = stringValue(anc.get("policyName"));
+            if (!operation.macAddress().equalsIgnoreCase(stringValue(anc.get("macAddress"))))
+                return inconclusive("ISE ANC resource MAC address did not match the requested endpoint");
+            if (action == EnforcementAction.CLEAR)
+                return failed("ISE still reports ANC policy " + policyName + " on the endpoint");
+            String intended = effectivePolicy(operation.policy());
+            return intended.equals(policyName)
+                    ? succeeded("ISE confirms ANC policy " + policyName + " is applied")
+                    : failed("ISE reports ANC policy " + policyName + " instead of " + intended);
+        } catch (Exception e) {
+            log.warn("Could not reconcile ISE operation {}: {}", operation.id(), e.getMessage());
+            return inconclusive("ISE state readback failed: " + e.getMessage());
+        }
+    }
+
+    private Map<String, Object> nestedMap(Map<String, Object> value, String key) {
+        if (value == null || !(value.get(key) instanceof Map<?, ?> nested)) return Map.of();
+        Map<String, Object> result = new HashMap<>();
+        nested.forEach((k, v) -> result.put(String.valueOf(k), v));
+        return result;
+    }
+
+    private String stringValue(Object value) { return value == null ? null : value.toString(); }
+
+    private IseReconciliationResult succeeded(String detail) {
+        return new IseReconciliationResult(IseReconciliationResult.Outcome.SUCCEEDED, detail);
+    }
+
+    private IseReconciliationResult failed(String detail) {
+        return new IseReconciliationResult(IseReconciliationResult.Outcome.FAILED, detail);
+    }
+
+    private IseReconciliationResult inconclusive(String detail) {
+        return new IseReconciliationResult(IseReconciliationResult.Outcome.INCONCLUSIVE, detail);
     }
 
     private IseResult applyAnc(String mac, EnforcementAction action, String policy) {
@@ -215,7 +319,7 @@ public class ErsIseTransport implements IseTransport {
         List<Map<String, String>> data = new ArrayList<>();
         data.add(Map.of("name", "macAddress", "value", mac));
         if (action == EnforcementAction.RESTRICT) {
-            String policyName = (policy == null || policy.isBlank()) ? props.getAncPolicyName() : policy;
+            String policyName = effectivePolicy(policy);
             data.add(Map.of("name", "policyName", "value", policyName));
         }
 
@@ -279,9 +383,7 @@ public class ErsIseTransport implements IseTransport {
             if (xml == null || xml.isBlank())
                 return Map.of();
 
-            Document doc = DocumentBuilderFactory.newInstance()
-                    .newDocumentBuilder()
-                    .parse(new ByteArrayInputStream(xml.getBytes(StandardCharsets.UTF_8)));
+            Document doc = SecureXml.parse(xml);
 
             Map<String, String> fields = new HashMap<>();
             NodeList all = doc.getElementsByTagName("*");

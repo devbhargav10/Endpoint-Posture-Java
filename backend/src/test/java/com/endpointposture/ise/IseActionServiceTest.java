@@ -15,6 +15,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
+import org.mockito.InOrder;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
@@ -29,6 +30,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.when;
 
 /** Pins the platform's audit rule: every ISE action writes exactly one audit row, success or failure. */
@@ -42,6 +44,7 @@ class IseActionServiceTest {
     @Mock AssessmentService assessmentService;
     @Mock IseTransport transport;
     @Mock IseActionAuditRepository audit;
+    @Mock IseOperationStore operationStore;
 
     IseActionService service;
     final UUID id = UUID.randomUUID();
@@ -143,6 +146,50 @@ class IseActionServiceTest {
         UUID other = UUID.randomUUID();
         when(endpoints.findById(other)).thenReturn(Optional.empty());
         assertThrows(EndpointNotFoundException.class, () -> service.restrict(other, null, "bob"));
+        verify(transport, never()).publishEnforcement(any(), any(), any());
+        verify(audit, never()).save(any());
+    }
+
+    @Test
+    void databaseFailureBeforeRequestPreventsExternalAction() {
+        IseActionService durable = new IseActionService(endpoints, assessmentService, transport, audit, operationStore);
+        when(operationStore.create(eq(id), eq(MAC), eq("RESTRICT"), eq("bob"), eq("policy"), eq(null), eq(null)))
+                .thenThrow(new IllegalStateException("database unavailable"));
+        assertThrows(IllegalStateException.class, () -> durable.restrict(id, "policy", "bob"));
+        verify(transport, never()).publishEnforcement(any(), any(), any());
+    }
+
+    @Test
+    void durableSuccessPersistsBeforeCallAndRecordsAudit() {
+        IseActionService durable = new IseActionService(endpoints, assessmentService, transport, audit, operationStore);
+        UUID operationId = UUID.randomUUID();
+        when(operationStore.create(eq(id), eq(MAC), eq("RESTRICT"), eq("bob"), eq("policy"), eq(null), eq(null)))
+                .thenReturn(operationId);
+        when(operationStore.claim(operationId)).thenReturn(true);
+        when(transport.publishEnforcement(MAC, EnforcementAction.RESTRICT, "policy"))
+                .thenReturn(new IseResult(true, "ANC_APPLIED"));
+
+        IseResult result = durable.restrict(id, "policy", "bob");
+
+        assertTrue(result.success());
+        InOrder order = inOrder(operationStore, transport);
+        order.verify(operationStore).create(id, MAC, "RESTRICT", "bob", "policy", null, null);
+        order.verify(operationStore).claim(operationId);
+        order.verify(transport).publishEnforcement(MAC, EnforcementAction.RESTRICT, "policy");
+        order.verify(operationStore).finish(operationId, new IseResult(true, "ANC_APPLIED"));
+        verify(audit, never()).save(any()); // finish() inserts the audit row in the same database transaction.
+    }
+
+    @Test
+    void duplicateActiveOperationDoesNotCallIseAgain() {
+        IseActionService durable = new IseActionService(endpoints, assessmentService, transport, audit, operationStore);
+        UUID operationId = UUID.randomUUID();
+        when(operationStore.create(eq(id), eq(MAC), eq("RESTRICT"), eq("bob"), eq("policy"), eq(null), eq(null)))
+                .thenReturn(operationId);
+        when(operationStore.claim(operationId)).thenReturn(false);
+        IseResult result = durable.restrict(id, "policy", "bob");
+        assertFalse(result.success());
+        assertTrue(result.ambiguous());
         verify(transport, never()).publishEnforcement(any(), any(), any());
         verify(audit, never()).save(any());
     }

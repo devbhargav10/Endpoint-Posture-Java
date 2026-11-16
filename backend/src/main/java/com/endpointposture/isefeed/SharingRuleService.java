@@ -1,5 +1,6 @@
 package com.endpointposture.isefeed;
 
+import com.endpointposture.api.ApiPaging;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Service;
@@ -56,7 +57,14 @@ public class SharingRuleService {
 
     @Transactional(readOnly = true)
     public List<Rule> history() {
-        return jdbc.query("SELECT " + COLUMNS + " FROM ise_sharing_rule ORDER BY version DESC", MAPPER);
+        return history(0, ApiPaging.DEFAULT_SIZE);
+    }
+
+    @Transactional(readOnly = true)
+    public List<Rule> history(int page, int size) {
+        var pageable = ApiPaging.of(page, size);
+        return jdbc.query("SELECT " + COLUMNS + " FROM ise_sharing_rule ORDER BY version DESC LIMIT ? OFFSET ?",
+                MAPPER, pageable.getPageSize(), pageable.getOffset());
     }
 
     /**

@@ -16,6 +16,8 @@ import java.util.List;
 import java.util.Map;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -39,6 +41,7 @@ class IseSessionWatcherTest {
     @BeforeEach
     void setUp() {
         when(endpoints.findConnectedRows()).thenReturn(List.of(row(MAC, "10.0.0.1")));
+        when(batch.tryLockPoll()).thenReturn(true);
         watcher = new IseSessionWatcher(client, endpoints, batch, new IseLinkHealth(), 2);
     }
 
@@ -55,14 +58,14 @@ class IseSessionWatcherTest {
     @Test
     void oneMissedPollKeepsEndpointConnected() {
         poll();
-        verify(batch, never()).markDisconnected(any());
+        verify(batch).advanceDisconnectGrace(List.of(), List.of(MAC), 2);
     }
 
     @Test
     void twoMissedPollsInARowDisconnects() {
         poll();
         poll();
-        verify(batch, times(1)).markDisconnected(List.of(MAC));
+        verify(batch, times(2)).advanceDisconnectGrace(List.of(), List.of(MAC), 2);
     }
 
     @Test
@@ -70,7 +73,7 @@ class IseSessionWatcherTest {
         poll();                                          // 1 miss
         poll(new IseActiveSession(MAC, "10.0.0.1"));     // back: counter reset
         poll();                                          // 1 miss again, not 2
-        verify(batch, never()).markDisconnected(any());
+        verify(batch, times(3)).advanceDisconnectGrace(any(), any(), eq(2));
     }
 
     @Test
@@ -78,9 +81,9 @@ class IseSessionWatcherTest {
         pollFailed();
         pollFailed();
         pollFailed();
-        verify(batch, never()).markDisconnected(any());
+        verify(batch, never()).advanceDisconnectGrace(any(), any(), anyInt());
         poll();                                          // only 1 real miss so far
-        verify(batch, never()).markDisconnected(any());
+        verify(batch, times(1)).advanceDisconnectGrace(any(), any(), eq(2));
     }
 
     @Test

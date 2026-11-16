@@ -11,6 +11,7 @@ import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Map;
+import org.springframework.web.bind.annotation.RequestParam;
 
 /**
  * Warranty data. Reads: any authenticated user. Upload: ADMIN only, enforced
@@ -27,8 +28,9 @@ public class WarrantyController {
     }
 
     @GetMapping
-    public List<WarrantyView> listAll() {
-        return service.listAll().stream().map(WarrantyView::of).toList();
+    public List<WarrantyView> listAll(@RequestParam(defaultValue = "0") int page,
+                                      @RequestParam(defaultValue = "100") int size) {
+        return service.listAll(page, size).stream().map(WarrantyView::of).toList();
     }
 
     @PostMapping("/upload")

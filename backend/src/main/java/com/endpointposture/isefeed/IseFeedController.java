@@ -56,8 +56,9 @@ public class IseFeedController {
 
     @Operation(summary = "Every sharing-rule version, newest first")
     @GetMapping("/sharing-rule/history")
-    public List<Rule> history() {
-        return ruleService.history();
+    public List<Rule> history(@RequestParam(defaultValue = "0") int page,
+                              @RequestParam(defaultValue = "100") int size) {
+        return ruleService.history(page, size);
     }
 
     @Operation(summary = "Approve a new sharing rule (ADMIN)",

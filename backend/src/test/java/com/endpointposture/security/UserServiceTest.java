@@ -8,6 +8,10 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 
 import java.time.Instant;
 import java.util.Optional;
@@ -15,6 +19,7 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -52,6 +57,18 @@ class UserServiceTest {
     private User user(String name, Role role, boolean enabled) {
         return User.builder().id(UUID.randomUUID()).username(name).passwordHash("x")
                 .role(role).enabled(enabled).build();
+    }
+
+    @Test
+    void userListingUsesBoundedDatabasePaging() {
+        when(users.findAll(any(Pageable.class))).thenReturn(new PageImpl<>(java.util.List.of(viewer, bob, alice)));
+
+        var result = service.list(2, Integer.MAX_VALUE);
+
+        assertEquals(java.util.List.of("vera", "bob", "alice"),
+                result.stream().map(User::getUsername).toList());
+        verify(users).findAll(eq(PageRequest.of(2, 500, Sort.by(
+                Sort.Order.asc("username").ignoreCase(), Sort.Order.asc("id")))));
     }
 
     // --- create ---

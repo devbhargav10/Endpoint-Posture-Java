@@ -21,8 +21,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Polls ISE for active sessions and brings endpoint connection state in line with it,
@@ -53,8 +53,6 @@ public class IseSessionWatcher {
     private final int gracePolls;
     private final Timer watcherTickTimer;
 
-    /** Consecutive missed polls per (normalized) MAC. */
-    private final Map<String, Integer> misses = new ConcurrentHashMap<>();
 
     public IseSessionWatcher(IseSessionClient client, EndpointRepository endpoints,
                              SessionBatchWriter batch, IseLinkHealth linkHealth,
@@ -78,6 +76,7 @@ public class IseSessionWatcher {
     }
 
     @Scheduled(fixedDelayString = "${app.ise.session-poll-interval-ms:15000}")
+    @Transactional
     public void tick() {
         long started = System.nanoTime();
         try {
@@ -95,6 +94,10 @@ public class IseSessionWatcher {
         if (!linkHealth.reachable()) {
             log.info("ISE reachable again - resuming session tracking");
         }
+
+        // One replica processes a snapshot at a time. The transaction lock is released
+        // automatically on commit/rollback, including after process failure.
+        if (!batch.tryLockPoll()) return;
         linkHealth.success();
 
         // MAC -> IP (IP may be null). Duplicates in the poll collapse to one entry.
@@ -133,17 +136,6 @@ public class IseSessionWatcher {
         // Grace period: only devices still flagged connected but absent are counted.
         Set<String> missing = new HashSet<>(connected.keySet());
         missing.removeAll(active.keySet());
-        misses.keySet().retainAll(missing); // devices that came back reset to zero
-
-        List<String> toDisconnect = new ArrayList<>();
-        for (String mac : missing) {
-            int count = misses.merge(mac, 1, Integer::sum);
-            if (count >= gracePolls) {
-                toDisconnect.add(mac);
-                misses.remove(mac);
-            }
-        }
-
         int queued = 0;
         if (!appeared.isEmpty()) {
             batch.markConnected(appeared);
@@ -153,7 +145,8 @@ public class IseSessionWatcher {
         if (!stillPresent.isEmpty()) {
             batch.touchSeen(stillPresent);
         }
-        int disconnected = toDisconnect.isEmpty() ? 0 : batch.markDisconnected(toDisconnect);
+        int disconnected = batch.advanceDisconnectGrace(new ArrayList<>(active.keySet()),
+                new ArrayList<>(missing), gracePolls);
 
         long ms = (System.nanoTime() - started) / 1_000_000;
         String summary = "ISE tick: active={} +{} connected, -{} disconnected, {} ip changes, "

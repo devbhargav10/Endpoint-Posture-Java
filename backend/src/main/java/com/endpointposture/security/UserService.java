@@ -1,5 +1,7 @@
 package com.endpointposture.security;
 
+import com.endpointposture.api.ApiPaging;
+import org.springframework.data.domain.Sort;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -24,8 +26,13 @@ public class UserService {
 
     @Transactional(readOnly = true)
     public List<User> list() {
-        return users.findAll().stream()
-                .sorted((a, b) -> a.getUsername().compareToIgnoreCase(b.getUsername())).toList();
+        return list(0, ApiPaging.DEFAULT_SIZE);
+    }
+
+    @Transactional(readOnly = true)
+    public List<User> list(int page, int size) {
+        return users.findAll(ApiPaging.of(page, size, Sort.by(
+                Sort.Order.asc("username").ignoreCase(), Sort.Order.asc("id")))).toList();
     }
 
     @Transactional

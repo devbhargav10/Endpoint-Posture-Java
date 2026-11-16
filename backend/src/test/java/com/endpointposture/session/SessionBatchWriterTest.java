@@ -5,7 +5,10 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.PostgreSQLContainer;
@@ -15,12 +18,16 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /** The bulk SQL is Postgres-specific (unnest, ANY, CTE), so it is tested against a real Postgres. */
 @Testcontainers
 @SpringBootTest(classes = EndpointPostureApplication.class)
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 class SessionBatchWriterTest {
 
     @Container
@@ -44,10 +51,12 @@ class SessionBatchWriterTest {
 
     @Autowired SessionBatchWriter batch;
     @Autowired JdbcTemplate jdbc;
+    @Autowired PlatformTransactionManager transactionManager;
 
     @AfterEach
     void cleanUp() {
         jdbc.update("DELETE FROM posture_job");
+        jdbc.update("DELETE FROM ise_disconnect_grace");
         jdbc.update("DELETE FROM endpoint"); // cascades to the session log
     }
 
@@ -97,6 +106,55 @@ class SessionBatchWriterTest {
 
         assertEquals(0, count("SELECT count(*) FROM endpoint WHERE connected"));
         assertEquals(1, count("SELECT count(*) FROM endpoint_session_log WHERE event_type = 'DISCONNECTED'"));
+    }
+
+    @Test
+    void connectedTransitionsAreIdempotentAcrossRepeatedSnapshots() {
+        batch.markConnected(Map.of(MAC, "10.0.0.9"));
+        batch.markConnected(Map.of(MAC, "10.0.0.9"));
+        assertEquals(1, count("SELECT count(*) FROM endpoint_session_log WHERE event_type = 'CONNECTED'"));
+    }
+
+    @Test
+    void disconnectGracePersistsAndOnlyDisconnectsAtConfiguredThreshold() {
+        batch.markConnected(Map.of(MAC, "10.0.0.9"));
+        assertEquals(0, batch.advanceDisconnectGrace(List.of(), List.of(MAC), 2));
+        assertEquals(1, count("SELECT miss_count FROM ise_disconnect_grace WHERE mac_address = ?", MAC));
+        assertEquals(1, batch.advanceDisconnectGrace(List.of(), List.of(MAC), 2));
+        assertEquals(0, batch.advanceDisconnectGrace(List.of(), List.of(MAC), 2));
+        assertEquals(1, count("SELECT count(*) FROM endpoint_session_log WHERE event_type = 'DISCONNECTED'"));
+    }
+
+    @Test
+    void activeSnapshotClearsPersistedDisconnectMisses() {
+        batch.markConnected(Map.of(MAC, "10.0.0.9"));
+        batch.advanceDisconnectGrace(List.of(), List.of(MAC), 3);
+        batch.advanceDisconnectGrace(List.of(MAC), List.of(), 3);
+        assertEquals(0, count("SELECT count(*) FROM ise_disconnect_grace WHERE mac_address = ?", MAC));
+    }
+
+    @Test
+    void pollLockAllowsOnlyOneConcurrentReplicaTransaction() throws Exception {
+        var acquired = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        var executor = Executors.newSingleThreadExecutor();
+        try {
+            var first = executor.submit(() -> new TransactionTemplate(transactionManager).execute(status -> {
+                boolean lock = batch.tryLockPoll();
+                acquired.countDown();
+                try { release.await(10, TimeUnit.SECONDS); }
+                catch (InterruptedException e) { Thread.currentThread().interrupt(); throw new RuntimeException(e); }
+                return lock;
+            }));
+            org.junit.jupiter.api.Assertions.assertTrue(acquired.await(10, TimeUnit.SECONDS));
+            Boolean second = new TransactionTemplate(transactionManager).execute(status -> batch.tryLockPoll());
+            org.junit.jupiter.api.Assertions.assertFalse(second);
+            release.countDown();
+            org.junit.jupiter.api.Assertions.assertTrue(first.get(10, TimeUnit.SECONDS));
+        } finally {
+            release.countDown();
+            executor.shutdownNow();
+        }
     }
 
     @Test

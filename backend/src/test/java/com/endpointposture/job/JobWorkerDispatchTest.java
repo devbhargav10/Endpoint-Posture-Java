@@ -24,6 +24,7 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
@@ -49,18 +50,27 @@ class JobWorkerDispatchTest {
         posture.setServerUrl("http://localhost:8090/api/v1/posture");
         posture.setApiKey("secret-key");
 
-        worker = new JobWorker(jobService, assessmentService, mock(HardwareHealthService.class),
-                mock(DiagnosticService.class), mock(SecurityIndicatorService.class),
-                posture, new HardwareAgentProperties(), new DiagnosticAgentProperties(),
-                new SecurityIndicatorAgentProperties(), policyService, runner, new ObjectMapper());
+        HardwareAgentProperties hardware = new HardwareAgentProperties();
+        DiagnosticAgentProperties diagnostic = new DiagnosticAgentProperties();
+        SecurityIndicatorAgentProperties security = new SecurityIndicatorAgentProperties();
+        HardwareHealthService hardwareService = mock(HardwareHealthService.class);
+        DiagnosticService diagnosticService = mock(DiagnosticService.class);
+        SecurityIndicatorService securityService = mock(SecurityIndicatorService.class);
+        JobOutcomeService outcomes = new JobOutcomeService(jobService, assessmentService,
+                hardwareService, diagnosticService, securityService);
+        JobSpecFactory factory = new JobSpecFactory(posture, hardware, diagnostic, security, policyService);
+        worker = new JobWorker(jobService, outcomes, factory, posture, hardware, diagnostic,
+                security, runner, new ObjectMapper());
 
         when(policyService.getActive()).thenReturn(new PolicyService.PolicySnapshot(
                 UUID.randomUUID(), "p", 3, List.of("Cisco Secure Client"), List.of("uTorrent"), "admin", Instant.now()));
 
         Endpoint ep = Endpoint.builder().id(endpointId).macAddress("AA:BB:CC:DD:EE:FF").ipAddress("10.0.0.5").build();
         job = PostureJob.builder().id(UUID.randomUUID()).endpoint(ep)
-                .jobType(JobType.POSTURE_CHECK).status(JobStatus.RUNNING).build();
+                .jobType(JobType.POSTURE_CHECK).status(JobStatus.RUNNING).attemptCount(2).build();
         when(jobService.claimNextJob()).thenReturn(Optional.of(job));
+        when(jobService.completeAttempt(any(), anyInt())).thenReturn(true);
+        when(jobService.failAttempt(any(), anyInt(), anyString())).thenReturn(true);
     }
 
     @Test
@@ -79,8 +89,8 @@ class JobWorkerDispatchTest {
         assertEquals("secret-key", c.getValue().environment().get("POSTURE_API_KEY"));
         assertFalse(cmd.contains("secret-key"), "the key must never be on the command line");
 
-        verify(jobService).markComplete(job.getId());
-        verify(jobService, never()).markFailed(any(), anyString());
+        verify(jobService).completeAttempt(job.getId(), 2);
+        verify(jobService, never()).failAttempt(any(), anyInt(), anyString());
     }
 
     @Test
@@ -90,8 +100,8 @@ class JobWorkerDispatchTest {
         worker.runOnce();
 
         verify(assessmentService).recordFailure(eq(endpointId), eq(job.getId()), anyString());
-        verify(jobService).markFailed(eq(job.getId()), anyString());
-        verify(jobService, never()).markComplete(any());
+        verify(jobService).failAttempt(eq(job.getId()), eq(2), anyString());
+        verify(jobService, never()).completeAttempt(any(), anyInt());
     }
 
     @Test
@@ -101,7 +111,7 @@ class JobWorkerDispatchTest {
 
         worker.runOnce();
 
-        verify(jobService).markFailed(job.getId(), "WinRM refused");
+        verify(jobService).failAttempt(job.getId(), 2, "WinRM refused");
     }
 
     @Test
@@ -110,7 +120,18 @@ class JobWorkerDispatchTest {
 
         worker.runOnce();
 
-        verify(jobService).markFailed(eq(job.getId()), org.mockito.ArgumentMatchers.contains("powershell.exe not found"));
+        verify(jobService).failAttempt(eq(job.getId()), eq(2), org.mockito.ArgumentMatchers.contains("powershell.exe not found"));
+    }
+
+    @Test
+    void supersededSuccessfulExecutionDoesNotCompleteTheNewerAttempt() throws Exception {
+        when(runner.run(any())).thenReturn(new AgentRunResult(0, false,
+                "RESULT_JSON:{\"submitted\":true}\n"));
+
+        assertTrue(worker.runOnce());
+
+        verify(jobService).completeAttempt(job.getId(), 2);
+        verifyNoInteractions(assessmentService);
     }
 
     @Test

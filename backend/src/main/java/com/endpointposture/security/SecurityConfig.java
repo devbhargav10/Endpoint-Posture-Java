@@ -2,6 +2,7 @@ package com.endpointposture.security;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.CommandLineRunner;
+import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -12,7 +13,10 @@ import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.access.intercept.AuthorizationFilter;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import com.endpointposture.worker.WorkerAuthFilter;
+import com.endpointposture.worker.WorkerResultBodyLimitFilter;
 
 @Configuration
 @EnableWebSecurity
@@ -23,6 +27,8 @@ public class SecurityConfig {
     private final PostureApiKeyFilter postureApiKeyFilter;
     private final IseFeedAuthFilter iseFeedAuthFilter;
     private final SecurityHeadersFilter securityHeadersFilter;
+    private final WorkerAuthFilter workerAuthFilter;
+    private final WorkerResultBodyLimitFilter workerResultBodyLimitFilter;
     private final boolean docsPublic;
 
     public SecurityConfig(
@@ -30,12 +36,23 @@ public class SecurityConfig {
             PostureApiKeyFilter postureApiKeyFilter,
             IseFeedAuthFilter iseFeedAuthFilter,
             SecurityHeadersFilter securityHeadersFilter,
+            WorkerAuthFilter workerAuthFilter,
+            WorkerResultBodyLimitFilter workerResultBodyLimitFilter,
             @Value("${app.docs.public:false}") boolean docsPublic) {
         this.jwtAuthFilter = jwtAuthFilter;
         this.postureApiKeyFilter = postureApiKeyFilter;
         this.iseFeedAuthFilter = iseFeedAuthFilter;
         this.securityHeadersFilter = securityHeadersFilter;
+        this.workerAuthFilter = workerAuthFilter;
+        this.workerResultBodyLimitFilter = workerResultBodyLimitFilter;
         this.docsPublic = docsPublic;
+    }
+
+    @Bean
+    public FilterRegistrationBean<WorkerResultBodyLimitFilter> workerResultBodyLimitFilterRegistration() {
+        FilterRegistrationBean<WorkerResultBodyLimitFilter> registration = new FilterRegistrationBean<>(workerResultBodyLimitFilter);
+        registration.setEnabled(false);
+        return registration;
     }
 
     @Bean
@@ -56,6 +73,7 @@ public class SecurityConfig {
                     auth.requestMatchers(
                             "/api/v1/auth/**",
                             "/actuator/health",
+                            "/actuator/health/**",   // liveness/readiness probe groups
                             "/error"
                     ).permitAll();
 
@@ -89,6 +107,12 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.PUT, "/api/v1/policy/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.POST, "/api/v1/warranty/upload").hasRole("ADMIN")
                         .requestMatchers("/api/v1/users/**").hasRole("ADMIN")
+                        // Enrollment uses a one-time token; all other worker routes require ROLE_WORKER.
+                        .requestMatchers(HttpMethod.POST, WorkerAuthFilter.ENROLL_PATH).permitAll()
+                        .requestMatchers("/api/v1/workers/**").hasRole("WORKER")
+                        .requestMatchers("/api/v1/admin/workers/**").hasRole("ADMIN")
+                        // Explicitly exclude machine workers from all other application APIs.
+                        .requestMatchers("/api/v1/**").hasAnyRole("ADMIN", "OPERATOR", "ANALYST", "VIEWER", "AGENT", "ISE_FEED")
                         .anyRequest().authenticated();
                 })
                 .addFilterBefore(
@@ -102,7 +126,10 @@ public class SecurityConfig {
                         UsernamePasswordAuthenticationFilter.class)
                 .addFilterBefore(
                         iseFeedAuthFilter,
-                        UsernamePasswordAuthenticationFilter.class);
+                        UsernamePasswordAuthenticationFilter.class)
+                .addFilterAfter(workerAuthFilter, JwtAuthFilter.class)
+                // Run after authorization so unauthenticated callers cannot make us buffer large bodies.
+                .addFilterAfter(workerResultBodyLimitFilter, AuthorizationFilter.class);
 
         return http.build();
     }

@@ -1,5 +1,6 @@
 package com.endpointposture.warranty;
 
+import com.endpointposture.api.ApiPaging;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
@@ -55,7 +56,12 @@ public class WarrantyService {
 
     @Transactional(readOnly = true)
     public List<WarrantyRecord> listAll() {
-        return repo.findAllByOrderByUploadedAtDesc();
+        return listAll(0, ApiPaging.DEFAULT_SIZE);
+    }
+
+    @Transactional(readOnly = true)
+    public List<WarrantyRecord> listAll(int page, int size) {
+        return repo.findAllByOrderByUploadedAtDescIdDesc(ApiPaging.of(page, size));
     }
 
     @Transactional(readOnly = true)

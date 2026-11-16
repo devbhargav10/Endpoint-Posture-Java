@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
 import java.util.UUID;
+import org.springframework.web.bind.annotation.RequestParam;
 
 /** Read side: an endpoint's hardware-health history. */
 @RestController
@@ -27,8 +28,10 @@ public class HardwareQueryController {
 
     @Operation(summary = "Hardware health history for an endpoint, newest first")
     @GetMapping
-    public List<HardwareHealthResponse> history(@PathVariable UUID id) {
-        return service.getHistoryForEndpoint(id);
+    public List<HardwareHealthResponse> history(@PathVariable UUID id,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "100") int size) {
+        return service.getHistoryForEndpoint(id, page, size);
     }
 
     @Operation(summary = "Latest hardware health report for an endpoint")

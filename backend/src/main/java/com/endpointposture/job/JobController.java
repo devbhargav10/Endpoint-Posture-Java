@@ -1,6 +1,7 @@
 package com.endpointposture.job;
 
 import com.endpointposture.job.dto.JobResponse;
+import com.endpointposture.endpoint.dto.PageResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -88,10 +89,29 @@ public class JobController {
         return jobService.listForEndpoint(endpointId, clamp(limit)).stream().map(this::toResponse).toList();
     }
 
+    @Operation(summary = "Page through newest jobs", description = "Zero-based page; size defaults to 25 and is capped at 200. Returns items, total, page and size.")
+    @GetMapping("/page")
+    public PageResponse<JobResponse> page(@RequestParam(defaultValue = "0") int page,
+                                          @RequestParam(defaultValue = "25") int size) {
+        PageResponse<PostureJob> result = jobService.pageRecent(Math.max(0, page), clampPageSize(size));
+        return new PageResponse<>(result.items().stream().map(this::toResponse).toList(), result.total(), result.page(), result.size());
+    }
+
+    @Operation(summary = "Page through jobs for one endpoint")
+    @GetMapping("/endpoint/{endpointId}/page")
+    public PageResponse<JobResponse> pageForEndpoint(@PathVariable UUID endpointId,
+                                                      @RequestParam(defaultValue = "0") int page,
+                                                      @RequestParam(defaultValue = "25") int size) {
+        PageResponse<PostureJob> result = jobService.pageForEndpoint(endpointId, Math.max(0, page), clampPageSize(size));
+        return new PageResponse<>(result.items().stream().map(this::toResponse).toList(), result.total(), result.page(), result.size());
+    }
+
     /** Keeps a caller-supplied limit between 1 and {@link #MAX_LIST_LIMIT}. */
     private static int clamp(int limit) {
         return Math.max(1, Math.min(limit, MAX_LIST_LIMIT));
     }
+
+    private static int clampPageSize(int size) { return Math.max(1, Math.min(size, 200)); }
 
     private JobResponse toResponse(PostureJob job) {
         return new JobResponse(

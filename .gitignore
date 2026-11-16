@@ -99,3 +99,21 @@ application-dev.yml
 EndpointPostureEngine.exe
 WinSW*.exe
 caddy.exe
+# Local development secrets
+/backend/src/main/resources/application-dev.yml
+
+
+# Terraform state, plans, local configuration and generated working files
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.plan
+*.tfvars
+*.tfvars.json
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json

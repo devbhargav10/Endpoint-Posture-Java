@@ -1,7 +1,9 @@
 package com.endpointposture.job;
 
+import jakarta.persistence.LockModeType;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -24,6 +26,25 @@ import java.util.UUID;
  */
 public interface PostureJobRepository extends JpaRepository<PostureJob, UUID> {
 
+        /** Inserts only when no active job exists; the partial unique index arbitrates across replicas. */
+        @Modifying
+        @Query(value = """
+                        INSERT INTO posture_job (endpoint_id, job_type, status, priority, attempt_count, max_attempts)
+                        VALUES (:endpointId, :type, 'QUEUED', :priority, 0, 3)
+                        ON CONFLICT (endpoint_id, job_type) WHERE status IN ('QUEUED', 'RUNNING') DO NOTHING
+                        """, nativeQuery = true)
+        int insertActiveIfAbsent(@Param("endpointId") UUID endpointId, @Param("type") String type,
+                                 @Param("priority") int priority);
+
+        Optional<PostureJob> findFirstByEndpoint_IdAndJobTypeAndStatusInOrderByCreatedAtAsc(
+                        UUID endpointId, JobType jobType, Collection<JobStatus> statuses);
+
+        /** Locks the job and eagerly loads its endpoint for an atomic worker result transaction. */
+        @Lock(LockModeType.PESSIMISTIC_WRITE)
+        @Query("SELECT j FROM PostureJob j JOIN FETCH j.endpoint WHERE j.id = :id")
+        Optional<PostureJob> findByIdForResultUpdate(@Param("id") UUID id);
+
+
         /**
          * Finds and locks the single highest-priority, oldest, currently-eligible
          * QUEUED job. FOR UPDATE SKIP LOCKED makes this safe under concurrency; it
@@ -40,11 +61,218 @@ public interface PostureJobRepository extends JpaRepository<PostureJob, UUID> {
                         """, nativeQuery = true)
         Optional<PostureJob> findNextClaimable();
 
+        /** Same locked claim operation, restricted to the authenticated worker's shard. */
+        @Query(value = """
+                        SELECT * FROM posture_job
+                        WHERE status = 'QUEUED'
+                          AND shard = :shard
+                          AND (next_attempt_at IS NULL OR next_attempt_at <= now())
+                        ORDER BY priority DESC, created_at ASC
+                        LIMIT 1
+                        FOR UPDATE SKIP LOCKED
+                        """, nativeQuery = true)
+        Optional<PostureJob> findNextClaimableInShard(@Param("shard") String shard);
+
+        /**
+         * Atomically completes a remote-worker job only if the worker still owns
+         * the current, unexpired attempt. attempt_count is the fencing token.
+         *
+         * @return one when the current attempt was completed, otherwise zero
+         */
+        @Modifying(clearAutomatically = true, flushAutomatically = true)
+        @Query(value = """
+                        UPDATE posture_job
+                           SET status = 'COMPLETE',
+                               completed_at = now(),
+                               error_message = NULL,
+                               claimed_by = NULL,
+                               lease_expires_at = NULL
+                         WHERE id = :id
+                           AND status = 'RUNNING'
+                           AND claimed_by = :worker
+                           AND attempt_count = :attempt
+                           AND lease_expires_at > now()
+                        """, nativeQuery = true)
+        int completeFenced(@Param("id") UUID id,
+                           @Param("worker") String worker,
+                           @Param("attempt") int attempt);
+
+        /**
+         * Atomically records a remote-worker failure only for the current,
+         * unexpired attempt. Jobs with attempts remaining are requeued using the
+         * existing attempt-count-minute backoff (capped at 15 minutes).
+         *
+         * @return one when the current attempt's failure was accepted, otherwise zero
+         */
+        @Modifying(clearAutomatically = true, flushAutomatically = true)
+        @Query(value = """
+                        UPDATE posture_job
+                           SET error_message = :error,
+                               status = CASE
+                                   WHEN attempt_count < max_attempts THEN 'QUEUED'
+                                   ELSE 'FAILED'
+                               END,
+                               next_attempt_at = CASE
+                                   WHEN attempt_count < max_attempts
+                                   THEN now() + (LEAST(attempt_count, 15) * INTERVAL '1 minute')
+                                   ELSE NULL
+                               END,
+                               completed_at = CASE
+                                   WHEN attempt_count >= max_attempts THEN now()
+                                   ELSE NULL
+                               END,
+                               claimed_by = NULL,
+                               lease_expires_at = NULL
+                         WHERE id = :id
+                           AND status = 'RUNNING'
+                           AND claimed_by = :worker
+                           AND attempt_count = :attempt
+                           AND lease_expires_at > now()
+                        """, nativeQuery = true)
+        int failFenced(@Param("id") UUID id,
+                       @Param("worker") String worker,
+                       @Param("attempt") int attempt,
+                       @Param("error") String error);
+
+        /**
+         * Atomically extends a remote worker's lease. Succeeds only for the current
+         * RUNNING attempt, owned by this worker, whose lease has not yet expired.
+         * The expiry never moves backwards (GREATEST) and an expired lease can
+         * never be revived: the predicate fails once lease_expires_at <= now().
+         *
+         * @return one when the lease was extended, otherwise zero
+         */
+        @Modifying(clearAutomatically = true, flushAutomatically = true)
+        @Query(value = """
+                        UPDATE posture_job
+                           SET lease_expires_at = GREATEST(lease_expires_at,
+                                   now() + (CAST(:seconds AS integer) * INTERVAL '1 second'))
+                         WHERE id = :id
+                           AND status = 'RUNNING'
+                           AND claimed_by = :worker
+                           AND attempt_count = :attempt
+                           AND lease_expires_at > now()
+                        """, nativeQuery = true)
+        int renewLease(@Param("id") UUID id,
+                       @Param("worker") String worker,
+                       @Param("attempt") int attempt,
+                       @Param("seconds") long seconds);
+
+        /**
+         * Stale-sweep failure for a remote-leased attempt. Same as failRunningAttempt
+         * but only while the lease is still expired at update time, so a renewal that
+         * lands between the sweep's read and this write wins.
+         */
+        @Modifying(clearAutomatically = true, flushAutomatically = true)
+        @Query(value = """
+                        UPDATE posture_job
+                           SET status = CASE WHEN attempt_count < max_attempts THEN 'QUEUED' ELSE 'FAILED' END,
+                               error_message = :msg,
+                               next_attempt_at = CASE
+                                   WHEN attempt_count < max_attempts
+                                   THEN now() + (LEAST(attempt_count, 15) * INTERVAL '1 minute')
+                                   ELSE NULL
+                               END,
+                               completed_at = CASE
+                                   WHEN attempt_count < max_attempts THEN NULL
+                                   ELSE now()
+                               END,
+                               claimed_by = NULL,
+                               lease_expires_at = NULL
+                         WHERE id = :id
+                           AND status = 'RUNNING'
+                           AND attempt_count = :attempt
+                           AND lease_expires_at IS NOT NULL
+                           AND lease_expires_at <= now()
+                        """, nativeQuery = true)
+        int failExpiredLeaseAttempt(@Param("id") UUID id, @Param("attempt") int attempt, @Param("msg") String msg);
+
+        /** Finds RUNNING jobs owned by workers that have been administratively disabled. */
+        @Query(value = """
+                        SELECT j.* FROM posture_job j
+                        JOIN worker_registry w ON w.id::text = j.claimed_by
+                        WHERE j.status = 'RUNNING' AND w.enabled = false
+                        ORDER BY j.started_at ASC, j.id ASC
+                        """, nativeQuery = true)
+        List<PostureJob> findRunningJobsOwnedByRevokedWorkers(Pageable pageable);
+
+        /** Fails only the current attempt while its recorded owner is still revoked. */
+        @Modifying(clearAutomatically = true, flushAutomatically = true)
+        @Query(value = """
+                        UPDATE posture_job j
+                           SET status = CASE WHEN j.attempt_count < j.max_attempts THEN 'QUEUED' ELSE 'FAILED' END,
+                               error_message = :msg,
+                               next_attempt_at = CASE
+                                   WHEN j.attempt_count < j.max_attempts
+                                   THEN now() + (LEAST(j.attempt_count, 15) * INTERVAL '1 minute')
+                                   ELSE NULL
+                               END,
+                               completed_at = CASE WHEN j.attempt_count < j.max_attempts THEN NULL ELSE now() END,
+                               claimed_by = NULL,
+                               lease_expires_at = NULL
+                         WHERE j.id = :id
+                           AND j.status = 'RUNNING'
+                           AND j.attempt_count = :attempt
+                           AND EXISTS (
+                               SELECT 1 FROM worker_registry w
+                                WHERE w.id::text = j.claimed_by AND w.enabled = false
+                           )
+                        """, nativeQuery = true)
+        int failRevokedWorkerAttempt(@Param("id") UUID id, @Param("attempt") int attempt,
+                                     @Param("msg") String msg);
+
+        /**
+         * Atomically completes an embedded-worker attempt. Unlike completeFenced,
+         * this deliberately does not require claimed_by or a remote lease because
+         * local claims have neither. attempt_count still prevents a late execution
+         * from completing a newer retry.
+         */
+        @Modifying(clearAutomatically = true, flushAutomatically = true)
+        @Query(value = """
+                        UPDATE posture_job
+                           SET status = 'COMPLETE',
+                               completed_at = now(),
+                               error_message = NULL,
+                               claimed_by = NULL,
+                               lease_expires_at = NULL
+                         WHERE id = :id
+                           AND status = 'RUNNING'
+                           AND attempt_count = :attempt
+                        """, nativeQuery = true)
+        int completeRunningAttempt(@Param("id") UUID id, @Param("attempt") int attempt);
+
+        /**
+         * Atomically fails an embedded-worker or stale-sweep attempt by its
+         * attempt token. Remote workers must use failFenced, which also validates
+         * worker identity and lease expiry.
+         */
+        @Modifying(clearAutomatically = true, flushAutomatically = true)
+        @Query(value = """
+                        UPDATE posture_job
+                           SET status = CASE WHEN attempt_count < max_attempts THEN 'QUEUED' ELSE 'FAILED' END,
+                               error_message = :msg,
+                               next_attempt_at = CASE
+                                   WHEN attempt_count < max_attempts
+                                   THEN now() + (LEAST(attempt_count, 15) * INTERVAL '1 minute')
+                                   ELSE NULL
+                               END,
+                               completed_at = CASE
+                                   WHEN attempt_count < max_attempts THEN NULL
+                                   ELSE now()
+                               END,
+                               claimed_by = NULL,
+                               lease_expires_at = NULL
+                         WHERE id = :id
+                           AND status = 'RUNNING'
+                           AND attempt_count = :attempt
+                        """, nativeQuery = true)
+        int failRunningAttempt(@Param("id") UUID id, @Param("attempt") int attempt, @Param("msg") String msg);
+
         /**
          * @param pageable page request, normally {@code PageRequest.of(0, limit)}
          * @return the newest jobs first, with their endpoints loaded
          */
-        @Query("SELECT j FROM PostureJob j JOIN FETCH j.endpoint ORDER BY j.createdAt DESC")
+        @Query("SELECT j FROM PostureJob j JOIN FETCH j.endpoint ORDER BY j.createdAt DESC, j.id DESC")
         List<PostureJob> findRecent(Pageable pageable);
 
         /**
@@ -52,15 +280,23 @@ public interface PostureJobRepository extends JpaRepository<PostureJob, UUID> {
          * @param pageable   page request, normally {@code PageRequest.of(0, limit)}
          * @return that endpoint's newest jobs first, with the endpoint loaded
          */
-        @Query("SELECT j FROM PostureJob j JOIN FETCH j.endpoint WHERE j.endpoint.id = :endpointId ORDER BY j.createdAt DESC")
+        @Query("SELECT j FROM PostureJob j JOIN FETCH j.endpoint WHERE j.endpoint.id = :endpointId ORDER BY j.createdAt DESC, j.id DESC")
         List<PostureJob> findRecentForEndpoint(@Param("endpointId") UUID endpointId, Pageable pageable);
 
+        long countByEndpoint_Id(UUID endpointId);
+
         /**
-         * @return jobs still RUNNING that started before the cutoff (stalled),
+         * @return local RUNNING jobs past the cutoff and remote RUNNING jobs with expired leases,
          *         endpoints loaded
          */
-        @Query("SELECT j FROM PostureJob j JOIN FETCH j.endpoint WHERE j.status = com.endpointposture.job.JobStatus.RUNNING AND j.startedAt < :cutoff")
-        List<PostureJob> findStaleRunning(@Param("cutoff") Instant cutoff);
+        @Query("""
+                        SELECT j FROM PostureJob j JOIN FETCH j.endpoint
+                         WHERE j.status = com.endpointposture.job.JobStatus.RUNNING
+                           AND ((j.leaseExpiresAt IS NOT NULL AND j.leaseExpiresAt <= :now)
+                                OR (j.leaseExpiresAt IS NULL AND j.startedAt < :cutoff))
+                         ORDER BY j.startedAt ASC, j.id ASC
+                        """)
+        List<PostureJob> findStaleRunning(@Param("cutoff") Instant cutoff, @Param("now") Instant now, Pageable pageable);
 
         /**
          * Bulk-deletes finished jobs that completed before the cutoff. Evidence rows
@@ -119,6 +355,7 @@ public interface PostureJobRepository extends JpaRepository<PostureJob, UUID> {
                            AND NOT EXISTS (SELECT 1 FROM posture_job j
                                             WHERE j.endpoint_id = e.id AND j.job_type = CAST(:type AS text)
                                               AND j.status IN ('QUEUED', 'RUNNING'))
+                        ON CONFLICT (endpoint_id, job_type) WHERE status IN ('QUEUED', 'RUNNING') DO NOTHING
                         """, nativeQuery = true)
         int enqueueForConnected(@Param("type") String type, @Param("priority") int priority);
 }

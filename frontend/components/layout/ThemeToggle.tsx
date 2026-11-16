@@ -22,16 +22,16 @@ export function ThemeToggle() {
 
   if (!mounted) {
     return (
-      <div className="h-9 w-9 rounded-lg border border-border bg-panel" />
+      <div className="h-10 w-10 rounded-md border border-border bg-panel" aria-hidden="true" />
     );
   }
 
   return (
     <button
       onClick={toggle}
-      aria-label="Toggle theme"
-      title={light ? "Switch to Dark Mode" : "Switch to Light Mode"}
-      className="group relative flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg border border-border bg-panel text-muted transition hover:border-accent/40 hover:text-ink focus:outline-none"
+      aria-label={light ? "Switch to dark theme" : "Switch to light theme"}
+      aria-pressed={light}
+      className="group relative flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-md border border-border bg-panel text-muted transition hover:border-accent/40 hover:text-ink"
     >
       {light ? (
         <Moon size={16} className="transition-transform group-hover:-rotate-12 text-accent" />

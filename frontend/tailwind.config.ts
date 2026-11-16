@@ -18,6 +18,8 @@ const config: Config = {
         medium: "rgb(var(--color-medium) / <alpha-value>)",
         bad: "rgb(var(--color-bad) / <alpha-value>)",
         good: "rgb(var(--color-good) / <alpha-value>)",
+        info: "rgb(var(--color-info) / <alpha-value>)",
+        neutral: "rgb(var(--color-neutral) / <alpha-value>)",
       },
       fontFamily: {
         sans: ["var(--font-sans)", "system-ui", "sans-serif"],

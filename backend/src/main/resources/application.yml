@@ -51,6 +51,8 @@ logging:
     com.endpointposture.security: INFO
 
 app:
+  scheduling:
+    enabled: ${APP_SCHEDULING_ENABLED:true}
   jwt:
     secret: ${JWT_SECRET}
     expiration-minutes: 480
@@ -84,6 +86,29 @@ app:
     # above this many endpoints; use /latest/batch and /hardware-health/page instead.
     fleet-list-max-endpoints: 2000
 
+  workers:
+    # Coarse pre-authentication ceiling bounds credential-hash lookups per source IP.
+    # Authenticated workers also have independent per-worker buckets below.
+    # The unauthenticated bucket only charges missing/invalid credentials so workers
+    # behind shared NAT addresses use independent authenticated worker buckets.
+    # Buckets are per backend replica; enforce cluster-wide ceilings at the ingress proxy.
+    ingress:
+      authentication-ip-capacity: ${WORKER_AUTH_IP_CAPACITY:6000}
+      authentication-ip-refill-tokens: ${WORKER_AUTH_IP_REFILL_TOKENS:6000}
+      authentication-ip-refill-duration-seconds: ${WORKER_AUTH_IP_REFILL_SECONDS:60}
+      unauthenticated-ip-capacity: ${WORKER_UNAUTH_IP_CAPACITY:120}
+      unauthenticated-ip-refill-tokens: ${WORKER_UNAUTH_IP_REFILL_TOKENS:120}
+      unauthenticated-ip-refill-duration-seconds: ${WORKER_UNAUTH_IP_REFILL_SECONDS:60}
+      authenticated-worker-capacity: ${WORKER_RATE_CAPACITY:600}
+      authenticated-worker-refill-tokens: ${WORKER_RATE_REFILL_TOKENS:600}
+      authenticated-worker-refill-duration-seconds: ${WORKER_RATE_REFILL_SECONDS:60}
+    lease-seconds: ${WORKER_LEASE_SECONDS:300}
+    # PR5.1: workers heartbeat at this interval; silent longer than stale-after => STALE (must be >= 2x interval).
+    # PR5.2: largest lease extension a worker may request per renewal (never below lease-seconds).
+    max-lease-extension-seconds: ${WORKER_MAX_LEASE_EXTENSION_SECONDS:900}
+    heartbeat-interval-seconds: ${WORKER_HEARTBEAT_INTERVAL_SECONDS:30}
+    stale-after-seconds: ${WORKER_STALE_AFTER_SECONDS:90}
+
   jobs:
     poll-interval-ms: 3000
     worker-threads: 4
@@ -106,8 +131,19 @@ app:
     base-url: ${ISE_BASE_URL:}
     username: ${ISE_USERNAME:}
     password: ${ISE_PASSWORD:}
-    verify-tls: false
+    verify-tls: ${ISE_VERIFY_TLS:true}
+    trust-store: ${ISE_TRUSTSTORE_PATH:}
+    trust-store-password: ${ISE_TRUSTSTORE_PASSWORD:}
+    trust-store-type: ${ISE_TRUSTSTORE_TYPE:PKCS12}
     session-poll-interval-ms: 15000
+    request-timeout-ms: "${ISE_REQUEST_TIMEOUT_MS:10000}"
+    operations:
+      max-attempts: "${ISE_OPERATION_MAX_ATTEMPTS:3}"
+      retry-base-seconds: "${ISE_OPERATION_RETRY_BASE_SECONDS:30}"
+      retry-max-seconds: "${ISE_OPERATION_RETRY_MAX_SECONDS:900}"
+      retry-batch-size: "${ISE_OPERATION_RETRY_BATCH_SIZE:25}"
+      recovery-interval-ms: "${ISE_OPERATION_RECOVERY_INTERVAL_MS:60000}"
+      stale-after-ms: "${ISE_OPERATION_STALE_AFTER_MS:300000}"
     disconnect-grace-polls: 2
     # S12: last_seen_at is rewritten for a still-connected device only when older than this.
     touch-min-minutes: 5
@@ -116,7 +152,7 @@ app:
 
   posture:
     script-path: ../scripts/posture_agent.ps1
-    server-url: http://localhost:8090/api/v1/posture
+    server-url: ${POSTURE_SERVER_URL:http://localhost:8090/api/v1/posture}
     api-key: ${POSTURE_API_KEY}
     cim-timeout-seconds: 30
     server-timeout-seconds: 15
@@ -124,14 +160,14 @@ app:
 
   hardware:
     script-path: ../scripts/hardware_health_agent.ps1
-    server-base-url: http://localhost:8090
+    server-base-url: ${APP_SERVER_BASE_URL:http://localhost:8090}
     cim-timeout-seconds: 30
     submit-timeout-seconds: 20
     process-timeout-seconds: 70
 
   diagnostics:
     script-path: ../scripts/diagnostic_agent.ps1
-    server-base-url: http://localhost:8090
+    server-base-url: ${APP_SERVER_BASE_URL:http://localhost:8090}
     winrm-open-timeout-seconds: 20
     winrm-operation-timeout-seconds: 70
     submit-timeout-seconds: 20
@@ -141,7 +177,7 @@ app:
 
   security-indicators:
     script-path: ../scripts/security_indicator_agent.ps1
-    server-base-url: http://localhost:8090
+    server-base-url: ${APP_SERVER_BASE_URL:http://localhost:8090}
     winrm-open-timeout-seconds: 20
     winrm-operation-timeout-seconds: 100
     submit-timeout-seconds: 20

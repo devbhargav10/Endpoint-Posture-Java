@@ -1,0 +1,146 @@
+package com.endpointposture.workerruntime;
+
+import com.sun.net.httpserver.HttpServer;
+
+import java.io.IOException;
+import java.io.OutputStream;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
+import java.net.URI;
+import java.nio.charset.StandardCharsets;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicInteger;
+
+public final class TestServer implements AutoCloseable {
+    public record Recorded(String method, String path, String workerKey, String body) {}
+
+    private final HttpServer server;
+    public final List<Recorded> requests = new CopyOnWriteArrayList<>();
+
+    public TestServer() throws IOException {
+        server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
+        server.start();
+    }
+
+    public URI uri() {
+        return URI.create("http://127.0.0.1:" + server.getAddress().getPort());
+    }
+
+    public void on(String path, int status, String body) {
+        on(path, status, body, Map.of());
+    }
+
+    public void on(String path, int status, String body, Map<String, String> headers) {
+        server.createContext(path, ex -> {
+            String reqBody = new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+            requests.add(new Recorded(ex.getRequestMethod(), ex.getRequestURI().getPath(),
+                    ex.getRequestHeaders().getFirst("X-Worker-Key"), reqBody));
+            headers.forEach((k, v) -> ex.getResponseHeaders().add(k, v));
+            byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+            if (bytes.length == 0) {
+                ex.sendResponseHeaders(status, -1);
+            } else {
+                ex.getResponseHeaders().add("Content-Type", "application/json");
+                ex.sendResponseHeaders(status, bytes.length);
+                try (OutputStream os = ex.getResponseBody()) {
+                    os.write(bytes);
+                }
+            }
+            ex.close();
+        });
+    }
+
+
+    public void onSequence(String path, int[] statuses, String body) {
+        String[] bodies = new String[statuses.length];
+        java.util.Arrays.fill(bodies, body);
+        onSequence(path, statuses, bodies);
+    }
+
+    public void onSequence(String path, int[] statuses, String[] bodies) {
+        onSequence(path, statuses, bodies, Map.of());
+    }
+
+    public void onSequence(String path, int[] statuses, String[] bodies, Map<String, String> headers) {
+        if (statuses.length == 0 || statuses.length != bodies.length)
+            throw new IllegalArgumentException("statuses and bodies must have the same non-zero length");
+        AtomicInteger index = new AtomicInteger();
+        server.createContext(path, ex -> {
+            String reqBody = new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+            requests.add(new Recorded(ex.getRequestMethod(), ex.getRequestURI().getPath(),
+                    ex.getRequestHeaders().getFirst("X-Worker-Key"), reqBody));
+            int i = Math.min(index.getAndIncrement(), statuses.length - 1);
+            int status = statuses[i];
+            byte[] bytes = bodies[i].getBytes(StandardCharsets.UTF_8);
+            headers.forEach((k, v) -> ex.getResponseHeaders().add(k, v));
+            ex.getResponseHeaders().add("Content-Type", "application/json");
+            if (status == 204 || status == 304 || bytes.length == 0) {
+                ex.sendResponseHeaders(status, -1);
+            } else {
+                ex.sendResponseHeaders(status, bytes.length);
+                try (OutputStream os = ex.getResponseBody()) {
+                    os.write(bytes);
+                }
+            }
+            ex.close();
+        });
+    }
+
+    /** Records a request and closes its socket without an HTTP response, then serves later responses. */
+    public void onDropThenSequence(String path, int[] statuses, String[] bodies) {
+        if (statuses.length == 0 || statuses.length != bodies.length)
+            throw new IllegalArgumentException("statuses and bodies must have the same non-zero length");
+        AtomicInteger index = new AtomicInteger();
+        server.createContext(path, ex -> {
+            String reqBody = new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+            requests.add(new Recorded(ex.getRequestMethod(), ex.getRequestURI().getPath(),
+                    ex.getRequestHeaders().getFirst("X-Worker-Key"), reqBody));
+            int i = Math.min(index.getAndIncrement(), statuses.length - 1);
+            try {
+                if (i == 0) {
+                    ex.getResponseBody().close();
+                    return;
+                }
+                byte[] bytes = bodies[i].getBytes(StandardCharsets.UTF_8);
+                ex.getResponseHeaders().add("Content-Type", "application/json");
+                ex.sendResponseHeaders(statuses[i], bytes.length);
+                try (OutputStream os = ex.getResponseBody()) { os.write(bytes); }
+            } catch (IOException ignored) {
+                // The client may already have abandoned a deliberately dropped response.
+            } finally {
+                ex.close();
+            }
+        });
+    }
+
+    public void onBlocking(String path, int status, String body,
+                           java.util.concurrent.CountDownLatch entered,
+                           java.util.concurrent.CountDownLatch release) {
+        server.createContext(path, ex -> {
+            String reqBody = new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+            requests.add(new Recorded(ex.getRequestMethod(), ex.getRequestURI().getPath(),
+                    ex.getRequestHeaders().getFirst("X-Worker-Key"), reqBody));
+            entered.countDown();
+            try {
+                release.await();
+                byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+                ex.getResponseHeaders().add("Content-Type", "application/json");
+                ex.sendResponseHeaders(status, bytes.length);
+                try (OutputStream os = ex.getResponseBody()) {
+                    os.write(bytes);
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            } finally {
+                ex.close();
+            }
+        });
+    }
+
+    @Override
+    public void close() {
+        server.stop(0);
+    }
+}

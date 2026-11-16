@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
 import java.util.UUID;
+import org.springframework.web.bind.annotation.RequestParam;
 
 /** Read side: an endpoint's diagnostic history. Requires a bearer token. */
 @RestController
@@ -26,8 +27,10 @@ public class DiagnosticQueryController {
 
     @Operation(summary = "Diagnostic history for an endpoint, newest first")
     @GetMapping
-    public List<DiagnosticResponse> history(@PathVariable UUID id) {
-        return service.history(id);
+    public List<DiagnosticResponse> history(@PathVariable UUID id,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "100") int size) {
+        return service.history(id, page, size);
     }
 
     @Operation(summary = "Latest diagnostic run for an endpoint",

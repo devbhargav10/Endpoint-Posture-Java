@@ -1,0 +1,8 @@
+target/
+.m2-review/
+.m2/
+**/.m2/**
+.env
+.env.*
+**/application-dev.yml
+**/*.log

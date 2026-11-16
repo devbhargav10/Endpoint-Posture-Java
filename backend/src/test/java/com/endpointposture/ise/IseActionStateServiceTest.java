@@ -56,7 +56,7 @@ class IseActionStateServiceTest {
                 .occurredAt(now.minusSeconds(10))
                 .build();
 
-        when(auditRepository.findLatestEnforcementActionsPerEndpoint()).thenReturn(List.of(audit1, audit2));
+        when(auditRepository.findLatestEnforcementActionsPerEndpoint(100, 0)).thenReturn(List.of(audit1, audit2));
 
         List<IseActionStateResponse> result = service.getLatestEnforcementStates();
 
@@ -78,17 +78,35 @@ class IseActionStateServiceTest {
         assertEquals("ISE connection timed out", r2.detail());
         assertEquals(now.minusSeconds(10), r2.occurredAt());
 
-        verify(auditRepository).findLatestEnforcementActionsPerEndpoint();
+        verify(auditRepository).findLatestEnforcementActionsPerEndpoint(100, 0);
     }
 
     @Test
     void getLatestEnforcementStatesReturnsEmptyListWhenNoRecordsExist() {
-        when(auditRepository.findLatestEnforcementActionsPerEndpoint()).thenReturn(List.of());
+        when(auditRepository.findLatestEnforcementActionsPerEndpoint(100, 0)).thenReturn(List.of());
 
         List<IseActionStateResponse> result = service.getLatestEnforcementStates();
 
         assertNotNull(result);
         assertTrue(result.isEmpty());
-        verify(auditRepository).findLatestEnforcementActionsPerEndpoint();
+        verify(auditRepository).findLatestEnforcementActionsPerEndpoint(100, 0);
+    }
+
+    @Test
+    void clampsStatePageAndSizeBeforeDatabaseQuery() {
+        when(auditRepository.findLatestEnforcementActionsPerEndpoint(500, 0)).thenReturn(List.of());
+
+        service.getLatestEnforcementStates(-1, Integer.MAX_VALUE);
+
+        verify(auditRepository).findLatestEnforcementActionsPerEndpoint(500, 0);
+    }
+
+    @Test
+    void forwardsPageOffsetToDatabaseQuery() {
+        when(auditRepository.findLatestEnforcementActionsPerEndpoint(25, 50)).thenReturn(List.of());
+
+        service.getLatestEnforcementStates(2, 25);
+
+        verify(auditRepository).findLatestEnforcementActionsPerEndpoint(25, 50);
     }
 }

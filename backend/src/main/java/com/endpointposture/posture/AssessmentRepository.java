@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.Collection;
+import org.springframework.data.domain.Pageable;
 
 /**
  * Data access for {@link Assessment}. Reads only ever add or list rows;
@@ -14,8 +15,7 @@ import java.util.Collection;
  */
 public interface AssessmentRepository extends JpaRepository<Assessment, UUID> {
 
-    /** @return that endpoint's assessments, newest first */
-    List<Assessment> findByEndpointIdOrderByCreatedAtDesc(UUID endpointId);
+    List<Assessment> findByEndpointIdOrderByCreatedAtDescIdDesc(UUID endpointId, Pageable pageable);
 
     /**
      * @return its most recent assessment, or empty if it has never been assessed

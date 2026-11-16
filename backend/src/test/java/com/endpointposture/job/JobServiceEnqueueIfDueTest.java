@@ -41,6 +41,8 @@ class JobServiceEnqueueIfDueTest {
         service = new JobService(jobs, endpoints);
         when(endpoints.findById(id)).thenReturn(Optional.of(Endpoint.builder().id(id).build()));
         when(jobs.save(any())).thenAnswer(i -> i.getArgument(0));
+        when(jobs.findFirstByEndpoint_IdAndJobTypeAndStatusInOrderByCreatedAtAsc(eq(id), any(), anyCollection()))
+                .thenReturn(Optional.of(PostureJob.builder().id(UUID.randomUUID()).endpoint(Endpoint.builder().id(id).build()).jobType(JobType.POSTURE_CHECK).status(JobStatus.QUEUED).build()));
         when(jobs.existsByEndpoint_IdAndJobTypeAndStatusIn(eq(id), any(), anyCollection())).thenReturn(false);
         when(jobs.findFirstByEndpoint_IdAndJobTypeAndStatusOrderByCompletedAtDesc(eq(id), any(), any()))
                 .thenReturn(Optional.empty());
@@ -55,7 +57,7 @@ class JobServiceEnqueueIfDueTest {
     @Test
     void neverRunEnqueues() {
         assertTrue(service.enqueueIfDue(id, JobType.POSTURE_CHECK, interval, backoff));
-        verify(jobs).save(any());
+        verify(jobs).insertActiveIfAbsent(eq(id), eq(JobType.POSTURE_CHECK.name()), any(Integer.class));
     }
 
     @Test

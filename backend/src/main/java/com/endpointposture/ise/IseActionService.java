@@ -10,8 +10,8 @@ import com.endpointposture.posture.AssessmentService;
 import com.endpointposture.posture.AssessmentStatus;
 import com.endpointposture.posture.dto.AssessmentResponse;
 import com.endpointposture.posture.dto.CheckResultResponse;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.UUID;
@@ -26,9 +26,9 @@ import java.util.stream.Collectors;
  * {@link com.endpointposture.posture.PostureIngestService} calls this
  * class, and nothing here runs as a side effect of a posture report
  * arriving - only {@link IseActionController} calls it, one method per
- * button in the dashboard. Every call writes exactly one
- * {@link IseActionAudit} row - success or failure - before returning,
- * so a failed CoA attempt is always visible, never silently dropped.</p>
+ * button in the dashboard. Each completed attempt writes an
+ * {@link IseActionAudit} row atomically with its operation transition;
+ * ambiguous outcomes remain visible for reconciliation.</p>
  */
 @Service
 public class IseActionService {
@@ -37,13 +37,25 @@ public class IseActionService {
     private final AssessmentService assessmentService;
     private final IseTransport transport;
     private final IseActionAuditRepository auditRepository;
+    private final IseOperationStore operations;
 
-    public IseActionService(EndpointRepository endpoints, AssessmentService assessmentService,
-                             IseTransport transport, IseActionAuditRepository auditRepository) {
+    @Autowired
+    public IseActionService(
+            EndpointRepository endpoints,
+            AssessmentService assessmentService,
+            IseTransport transport,
+            IseActionAuditRepository auditRepository,
+            IseOperationStore operations) {
         this.endpoints = endpoints;
         this.assessmentService = assessmentService;
         this.transport = transport;
         this.auditRepository = auditRepository;
+        this.operations = operations;
+    }
+
+    public IseActionService(EndpointRepository endpoints, AssessmentService assessmentService,
+                            IseTransport transport, IseActionAuditRepository auditRepository) {
+        this(endpoints, assessmentService, transport, auditRepository, null);
     }
 
     /**
@@ -57,21 +69,26 @@ public class IseActionService {
      * @return the ISE result
      * @throws EndpointNotFoundException if the endpoint does not exist
      */
-    @Transactional
     public IseResult sharePosture(UUID endpointId, String operator) {
         Endpoint endpoint = endpoints.findById(endpointId)
                 .orElseThrow(() -> new EndpointNotFoundException(endpointId.toString()));
 
         IseResult result;
+        String status;
+        String details;
         try {
             AssessmentResponse latest = assessmentService.getLatestForEndpoint(endpointId);
-            result = transport.publishPosture(endpoint.getMacAddress(), latest.status().name(), summarizeFailedChecks(latest));
+            status = latest.status().name();
+            details = summarizeFailedChecks(latest);
         } catch (AssessmentNotFoundException e) {
             result = new IseResult(false, "No stored assessment for this endpoint yet - run a posture check first");
+            writeAudit(endpoint.getId(), "SHARE_POSTURE", operator, result);
+            return result;
         }
-
-        writeAudit(endpoint.getId(), "SHARE_POSTURE", operator, result);
-        return result;
+        final String assessmentStatus = status;
+        final String assessmentDetails = details;
+        return execute(endpoint, "SHARE_POSTURE", operator, null, assessmentStatus, assessmentDetails,
+                () -> transport.publishPosture(endpoint.getMacAddress(), assessmentStatus, assessmentDetails));
     }
 
     /**
@@ -85,7 +102,6 @@ public class IseActionService {
      * @param operator   the authenticated caller
      * @return the ISE result
      */
-    @Transactional
     public IseResult restrict(UUID endpointId, String policy, String operator) {
         return enforce(endpointId, EnforcementAction.RESTRICT, policy, "RESTRICT", operator);
     }
@@ -97,7 +113,6 @@ public class IseActionService {
      * @param operator   the authenticated caller
      * @return the ISE result
      */
-    @Transactional
     public IseResult clearRestriction(UUID endpointId, String operator) {
         return enforce(endpointId, EnforcementAction.CLEAR, null, "CLEAR_RESTRICTION", operator);
     }
@@ -107,8 +122,29 @@ public class IseActionService {
         Endpoint endpoint = endpoints.findById(endpointId)
                 .orElseThrow(() -> new EndpointNotFoundException(endpointId.toString()));
 
-        IseResult result = transport.publishEnforcement(endpoint.getMacAddress(), action, policy);
-        writeAudit(endpoint.getId(), auditActionType, operator, result);
+        String normalizedPolicy = transport.effectivePolicy(policy);
+        String effectivePolicy = normalizedPolicy == null ? policy : normalizedPolicy;
+        return execute(endpoint, auditActionType, operator, effectivePolicy, null, null,
+                () -> transport.publishEnforcement(endpoint.getMacAddress(), action, effectivePolicy));
+    }
+
+    private IseResult execute(
+            Endpoint endpoint, String action, String operator, String policy,
+            String status, String details, java.util.function.Supplier<IseResult> call) {
+        if (operations == null) {
+            IseResult direct = call.get();
+            writeAudit(endpoint.getId(), action, operator, direct);
+            return direct;
+        }
+        UUID id = operations.create(
+                endpoint.getId(), endpoint.getMacAddress(), action, operator, policy, status, details);
+        if (!operations.claim(id)) return new IseResult(false, "Operation is already being processed", true);
+        IseResult result;
+        try { result = call.get(); }
+        catch (RuntimeException ex) {
+            result = new IseResult(false, "ISE outcome is unknown; reconciliation is required", true);
+        }
+        operations.finish(id, result);
         return result;
     }
 

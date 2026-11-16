@@ -5,6 +5,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import org.springframework.data.domain.Pageable;
 
 /** Data access for {@link AppPolicy}. */
 public interface AppPolicyRepository extends JpaRepository<AppPolicy, UUID> {
@@ -16,5 +17,5 @@ public interface AppPolicyRepository extends JpaRepository<AppPolicy, UUID> {
     Optional<AppPolicy> findFirstByOrderByVersionDesc();
 
     /** @return every policy version, newest first */
-    List<AppPolicy> findAllByOrderByVersionDesc();
+    List<AppPolicy> findAllByOrderByVersionDesc(Pageable pageable);
 }

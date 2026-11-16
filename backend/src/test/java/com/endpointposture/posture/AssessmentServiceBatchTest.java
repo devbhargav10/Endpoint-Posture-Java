@@ -18,6 +18,7 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyCollection;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -54,7 +55,7 @@ class AssessmentServiceBatchTest {
     @Test
     void historyLoadsAllChecksWithOneQueryAndAttachesThemToTheRightAssessment() {
         Assessment a1 = assessment(), a2 = assessment(), a3 = assessment();
-        when(assessments.findByEndpointIdOrderByCreatedAtDesc(endpointId)).thenReturn(List.of(a1, a2, a3));
+        when(assessments.findByEndpointIdOrderByCreatedAtDescIdDesc(eq(endpointId), any())).thenReturn(List.of(a1, a2, a3));
         when(checks.findByAssessmentIdIn(anyCollection()))
                 .thenReturn(List.of(check(a1, "FIREWALL"), check(a1, "OPEN_PORTS"), check(a3, "FIREWALL")));
 
@@ -82,7 +83,7 @@ class AssessmentServiceBatchTest {
 
     @Test
     void noAssessmentsMeansNoCheckQueriesAtAll() {
-        when(assessments.findByEndpointIdOrderByCreatedAtDesc(endpointId)).thenReturn(List.of());
+        when(assessments.findByEndpointIdOrderByCreatedAtDescIdDesc(eq(endpointId), any())).thenReturn(List.of());
         assertTrue(service.getHistoryForEndpoint(endpointId).isEmpty());
         verifyNoInteractions(checks);
     }

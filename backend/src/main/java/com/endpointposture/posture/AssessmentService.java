@@ -1,6 +1,7 @@
 package com.endpointposture.posture;
 
 import com.endpointposture.posture.dto.AssessmentResponse;
+import com.endpointposture.api.ApiPaging;
 import com.endpointposture.posture.dto.CheckInput;
 import com.endpointposture.posture.dto.CheckResultResponse;
 import org.springframework.stereotype.Service;
@@ -104,7 +105,13 @@ public class AssessmentService {
     /** @return all of an endpoint's assessments, newest first (empty list if none); checks loaded in one batch */
     @Transactional(readOnly = true)
     public List<AssessmentResponse> getHistoryForEndpoint(UUID endpointId) {
-        return toResponses(assessmentRepository.findByEndpointIdOrderByCreatedAtDesc(endpointId));
+        return getHistoryForEndpoint(endpointId, 0, ApiPaging.DEFAULT_SIZE);
+    }
+
+    @Transactional(readOnly = true)
+    public List<AssessmentResponse> getHistoryForEndpoint(UUID endpointId, int page, int size) {
+        return toResponses(assessmentRepository.findByEndpointIdOrderByCreatedAtDescIdDesc(
+                endpointId, ApiPaging.of(page, size)));
     }
 
     /**

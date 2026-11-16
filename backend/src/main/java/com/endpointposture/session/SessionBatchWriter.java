@@ -39,25 +39,22 @@ public class SessionBatchWriter {
                AND last_seen_at < now() - (?::bigint * interval '1 minute')
             """;
 
-    private static final String CONNECT_SQL = """
-            INSERT INTO endpoint (mac_address, ip_address, connected, session_started_at,
-                                  first_seen_at, last_seen_at, created_at, updated_at)
-            SELECT t.m, t.i, true, now(), now(), now(), now(), now()
-              FROM unnest(?::text[], ?::text[]) AS t(m, i)
-            ON CONFLICT (mac_address) DO UPDATE
-               SET connected          = true,
-                   ip_address         = COALESCE(EXCLUDED.ip_address, endpoint.ip_address),
-                   session_started_at = now(),
-                   last_seen_at       = now(),
-                   updated_at         = now()
+    private static final String CONNECT_TRANSITION_SQL = """
+            WITH changed AS (
+                INSERT INTO endpoint(mac_address, ip_address, connected, session_started_at,
+                    first_seen_at, last_seen_at, created_at, updated_at)
+                SELECT m, i, true, now(), now(), now(), now(), now()
+                  FROM unnest(?::text[], ?::text[]) AS incoming(m, i)
+                ON CONFLICT(mac_address) DO UPDATE SET connected=true,
+                    session_started_at=now(), ip_address=COALESCE(EXCLUDED.ip_address,endpoint.ip_address),
+                    last_seen_at=now(), updated_at=now()
+                    WHERE endpoint.connected=false
+                RETURNING id, ip_address
+            ) INSERT INTO endpoint_session_log(endpoint_id,event_type,ip_address)
+              SELECT id,'CONNECTED',ip_address FROM changed
             """;
 
-    private static final String LOG_CONNECTED_SQL = """
-            INSERT INTO endpoint_session_log (endpoint_id, event_type, ip_address)
-            SELECT id, 'CONNECTED', ip_address
-              FROM endpoint
-             WHERE mac_address = ANY(?::text[])
-            """;
+    private static final String LOCK_POLL_SQL = "SELECT pg_try_advisory_xact_lock(730041219)";
 
     private static final String IP_SQL = """
             UPDATE endpoint e
@@ -90,6 +87,7 @@ public class SessionBatchWriter {
                                 WHERE j.endpoint_id = e.id AND j.job_type = 'POSTURE_CHECK'
                                   AND j.status = 'COMPLETE'
                                   AND j.completed_at > now() - (?::bigint * interval '1 minute')))
+            ON CONFLICT (endpoint_id, job_type) WHERE status IN ('QUEUED', 'RUNNING') DO NOTHING
             """;
 
     private final JdbcTemplate jdbc;
@@ -102,6 +100,12 @@ public class SessionBatchWriter {
         this.jdbc = jdbc;
         this.reconnectGapMinutes = reconnectGapMinutes;
         this.touchMinMinutes = touchMinMinutes;
+    }
+
+    /** Serializes successful ISE snapshots across replicas for the transaction lifetime. */
+    public boolean tryLockPoll() {
+        Boolean acquired = jdbc.queryForObject(LOCK_POLL_SQL, Boolean.class);
+        return Boolean.TRUE.equals(acquired);
     }
 
     /**
@@ -118,12 +122,13 @@ public class SessionBatchWriter {
 
         for (List<String> chunk : chunks(macs)) {
             List<String> ips = new ArrayList<>(chunk.size());
-            for (String mac : chunk) ips.add(macToIp.get(mac));
-            jdbc.update(CONNECT_SQL, ps -> {
+            for (int i = 0; i < chunk.size(); i++) {
+                ips.add(macToIp.get(chunk.get(i)));
+            }
+            jdbc.update(CONNECT_TRANSITION_SQL, ps -> {
                 setTextArray(ps, 1, chunk);
                 setTextArray(ps, 2, ips);
             });
-            jdbc.update(LOG_CONNECTED_SQL, ps -> setTextArray(ps, 1, chunk));
         }
         return macs.size();
     }
@@ -185,6 +190,31 @@ public class SessionBatchWriter {
             changed += jdbc.update(DISCONNECT_SQL, ps -> setTextArray(ps, 1, chunk));
         }
         return changed;
+    }
+
+    /** Durable grace counter; active devices clear their counter, missing devices advance it. */
+    @Transactional
+    public int advanceDisconnectGrace(List<String> activeMacs, List<String> connectedMacs, int gracePolls) {
+        jdbc.update("DELETE FROM ise_disconnect_grace WHERE mac_address = ANY(?::text[])", ps -> setTextArray(ps, 1, activeMacs));
+        int disconnected = 0;
+        for (List<String> chunk : chunks(connectedMacs)) {
+            disconnected += jdbc.update("""
+                WITH misses AS (
+                    INSERT INTO ise_disconnect_grace(mac_address, miss_count, updated_at)
+                    SELECT m, 1, now() FROM unnest(?::text[]) m
+                    ON CONFLICT(mac_address) DO UPDATE SET miss_count=ise_disconnect_grace.miss_count+1, updated_at=now()
+                    RETURNING mac_address, miss_count
+                ), changed AS (
+                    UPDATE endpoint e SET connected=false, last_disconnected_at=now(), updated_at=now()
+                    FROM misses m WHERE e.mac_address=m.mac_address AND e.connected AND m.miss_count >= ?
+                    RETURNING e.id
+                ) INSERT INTO endpoint_session_log(endpoint_id,event_type)
+                    SELECT id,'DISCONNECTED' FROM changed
+                """, ps -> { setTextArray(ps, 1, chunk); ps.setInt(2, gracePolls); });
+        }
+        jdbc.update("DELETE FROM ise_disconnect_grace g WHERE NOT EXISTS " +
+                "(SELECT 1 FROM endpoint e WHERE e.mac_address=g.mac_address AND e.connected)");
+        return disconnected;
     }
 
     private static List<List<String>> chunks(List<String> all) {

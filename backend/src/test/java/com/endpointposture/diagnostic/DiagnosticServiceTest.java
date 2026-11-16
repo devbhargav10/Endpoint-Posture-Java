@@ -22,6 +22,7 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -276,7 +277,7 @@ class DiagnosticServiceTest {
     void historyKeepsTheRepositoryOrderNewestFirst() {
         EndpointDiagnostic newer = row(EndpointDiagnostic.Status.OK, 90);
         EndpointDiagnostic older = row(EndpointDiagnostic.Status.WINRM_UNAVAILABLE, null);
-        when(repository.findByEndpointIdOrderByCollectedAtDesc(endpointId)).thenReturn(List.of(newer, older));
+        when(repository.findByEndpointIdOrderByCollectedAtDescIdDesc(eq(endpointId), any())).thenReturn(List.of(newer, older));
 
         List<DiagnosticResponse> out = service.history(endpointId);
 
