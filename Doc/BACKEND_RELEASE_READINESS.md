@@ -1,9 +1,9 @@
 # Backend release readiness
 
 **Audit date:** 2026-11-16
-**Branch under verification:** `codex/application-integration`
+**Merged application branch:** `main`
 **Base:** `main` at `71b77a4df639d37796da3f53db74d8e463b87198`
-**State:** Local backend, worker, frontend, and live frontend/backend API checks passed. This branch has not yet been pushed; PR checks and production acceptance remain outstanding.
+**State:** PR #20 merged to `main` as `a04aefbcbb2149e0ea6fb8fe7ff3f5e88605be06`. GitHub Actions run `43859069702` passed backend, Windows worker, frontend, live API integration, and both Docker image builds. Production and live ISE/worker acceptance remain outstanding.
 
 ## Implementation reviewed
 
@@ -58,8 +58,7 @@ The CI backend job now starts the packaged application against its PostgreSQL se
 
 ## Release gates
 
-1. Push the verified branch and confirm required GitHub Actions checks on its pull request.
-2. Test the deployed ISE certificate chain/hostname with approved trust material and the target ISE version.
-3. Perform authenticated Windows-worker to Linux-backend acceptance for enrollment, heartbeat, lease/fencing, retry, revocation, and crash recovery.
-4. Complete and test secure endpoint credential delivery before enabling remote PowerShell collection.
-5. Approve deployment secret provisioning, gateway ingress/client-IP policy, state bootstrap, network egress, database backup/restore, and monitoring.
+1. Test the deployed ISE certificate chain/hostname with approved trust material and the target ISE version.
+2. Perform authenticated Windows-worker to Linux-backend acceptance for enrollment, heartbeat, lease/fencing, retry, revocation, and crash recovery.
+3. Complete and test secure endpoint credential delivery before enabling remote PowerShell collection.
+4. Approve deployment secret provisioning, gateway ingress/client-IP policy, state bootstrap, network egress, database backup/restore, and monitoring.
