@@ -1,6 +1,7 @@
 # Backend release readiness
 
-**Audit date:** 2026-11-16
+**Audit date:** 2026-11-17
+**Current verification base:** `main` at `3d17d10551e54caebe52a6bda0ba5fb4d88315e1`
 **Merged application branch:** `main`
 **Base:** `main` at `71b77a4df639d37796da3f53db74d8e463b87198`
 **State:** PR #20 merged to `main` as `a04aefbcbb2149e0ea6fb8fe7ff3f5e88605be06`. GitHub Actions run `43859069702` passed backend, Windows worker, frontend, live API integration, and both Docker image builds. Production and live ISE/worker acceptance remain outstanding.
@@ -62,3 +63,30 @@ The CI backend job now starts the packaged application against its PostgreSQL se
 2. Perform authenticated Windows-worker to Linux-backend acceptance for enrollment, heartbeat, lease/fencing, retry, revocation, and crash recovery.
 3. Complete and test secure endpoint credential delivery before enabling remote PowerShell collection.
 4. Approve deployment secret provisioning, gateway ingress/client-IP policy, state bootstrap, network egress, database backup/restore, and monitoring.
+
+
+## Coordinator verification update (2026-11-17)
+
+The following checks were rerun against the current application baseline or its PR6.7 worker snapshot. These results supersede older status text where they differ.
+
+### Backend
+
+- `mvn -B clean verify "-Duser.timezone=UTC"` from `backend/`: **exit 0 / BUILD SUCCESS**.
+- Surefire XML: **595 tests, 0 failures, 0 errors, 0 skipped** across 84 reports.
+- Testcontainers PostgreSQL ran; Flyway validated 29 migrations and migrated a fresh database through V32.
+- The Spring Boot executable JAR was packaged. Expected injected SQL failures in recovery/rollback tests were asserted and passed.
+
+### Frontend
+
+- `npm ci`: exit 0, 529 packages, 0 reported audit vulnerabilities. Installed Node 20.18 produced an engine warning because one dependency declares Node >=20.19.
+- `npm run typecheck`, `npm run lint`, `npm test`, and `npm run build`: all exited 0. Unit tests: 6 files / 30 tests; production build generated 19 routes.
+- `npx vitest run --config vitest.integration.config.mjs`: command exited 0, but its single API integration test was skipped because `BACKEND_API_URL` and `BACKEND_API_PASSWORD` were not configured. No live API integration was verified in this rerun.
+
+### Windows worker deployment package
+
+- All 12 deployment PowerShell scripts parsed with zero errors. The WinSW XML parsed and its service ID, required environment nodes, and `EP_POWERSHELL_EXECUTION_ENABLED=false` were verified.
+- Disposable canonical ACL path validation passed with `-ValidateOnly`; it made no ACL changes. `git diff --check` passed.
+- Surefire XML reported **107 tests, 0 failures, 0 errors, 1 platform-specific skip**. The complete `mvn -B clean verify "-Duser.timezone=UTC"` command **exited 1** in Maven Shade while replacing the original artifact. The shaded JAR exists, but this run is not a successful Maven build.
+- No Windows service was installed or started. SCM identity, DPAPI after a genuine service restart, heartbeat and live result replay still require disposable Windows/backend acceptance.
+
+PowerShell collection remains disabled. Protected endpoint credential delivery is not designed or accepted, and the enrollment bootstrap’s transient process-environment token handling has not been validated against the target host threat model. Do not treat static checks or component tests as deployment acceptance.
