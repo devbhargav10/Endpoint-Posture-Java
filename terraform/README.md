@@ -5,7 +5,7 @@ This is an infrastructure-only starting point for the production target describe
 ## Included foundation
 
 - A two-AZ VPC with public edge, private application/runner, and isolated database subnets.
-- Security group boundaries for a future TLS edge, API/worker traffic, and PostgreSQL.
+- Security group boundaries for a future TLS edge and API/worker traffic. The PostgreSQL module owns the database security group attached to RDS.
 - Optional NAT egress. NAT is off in the dev example and carries material hourly/data charges; production should generally use one per AZ if private workloads require internet egress.
 - Encrypted, private PostgreSQL 16 RDS with automated backups, storage autoscaling, deletion protection, optional Multi-AZ, and an RDS-managed master credential in Secrets Manager.
 - Separate example inputs and Terraform state keys for dev, staging, and production.
@@ -46,6 +46,6 @@ For a deployment, first bootstrap the state bucket and restrict its access. Copy
 
 ## Before first development deployment
 
-Decide the AWS account and region, confirm CIDR non-overlap with endpoint/ISE networks, verify PostgreSQL 16 minor version and instance availability in that region, and determine what private workloads need outbound access. Choose backend/frontend hosting and packaging (the API is not currently containerized), TLS/domain ingress, worker placement, and site-to-site VPN or Direct Connect routing. Define the least-privilege workload IAM roles and secret access; use GitHub OIDC for CI rather than long-lived AWS keys. Set a budget, backup retention, recovery objectives, log retention, and production HA policy. Also decide who owns Terraform state bootstrap and database application-user creation/rotation.
+Decide the AWS account and region, confirm CIDR non-overlap with endpoint/ISE networks, verify PostgreSQL 16 minor version and instance availability in that region, and determine what private workloads need outbound access. Choose backend/frontend hosting and packaging (the backend Dockerfile is built by CI but the image is not published or deployed here), TLS/domain ingress, worker placement, and site-to-site VPN or Direct Connect routing. Define the least-privilege workload IAM roles and secret access; use GitHub OIDC for CI rather than long-lived AWS keys. Set a budget, backup retention, recovery objectives, log retention, and production HA policy. Also decide who owns Terraform state bootstrap and database application-user creation/rotation.
 
 The current CIDRs, region, database classes, and engine minor versions in examples are placeholders for review, not deployment-approved values.

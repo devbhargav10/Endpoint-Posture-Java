@@ -157,16 +157,3 @@ resource "aws_security_group" "application" {
   }
   tags = merge(var.tags, { Name = "${var.name_prefix}-application-sg" })
 }
-
-resource "aws_security_group" "database" {
-  name        = "${var.name_prefix}-database"
-  description = "PostgreSQL access only from the backend application security group."
-  vpc_id      = aws_vpc.this.id
-  ingress {
-    from_port       = 5432
-    to_port         = 5432
-    protocol        = "tcp"
-    security_groups = [aws_security_group.application.id]
-  }
-  tags = merge(var.tags, { Name = "${var.name_prefix}-database-sg" })
-}
