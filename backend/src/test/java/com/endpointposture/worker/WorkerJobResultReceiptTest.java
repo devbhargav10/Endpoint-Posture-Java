@@ -237,6 +237,15 @@ class WorkerJobResultReceiptTest {
                 WorkerResultRequest.CollectionOutcome.FAILED, mapper.readTree("{}"),
                 List.of("x".repeat(WorkerResultRequest.MAX_DIAGNOSTIC_TEXT_BYTES + 1)), List.of(), 1);
         assertFalse(validator.validate(tooMuchDiagnosticText).isEmpty());
+        WorkerResultRequest tooManyWarnings = new WorkerResultRequest(1, 1, JobType.POSTURE_CHECK,
+                WorkerResultRequest.CollectionOutcome.PARTIAL, mapper.readTree("{}"),
+                List.of(), java.util.Collections.nCopies(101, "warning"), 0);
+        assertFalse(validator.validate(tooManyWarnings).isEmpty());
+        WorkerResultRequest overlongWarning = new WorkerResultRequest(1, 1, JobType.POSTURE_CHECK,
+                WorkerResultRequest.CollectionOutcome.PARTIAL, mapper.readTree("{}"),
+                List.of(), List.of("x".repeat(4097)), 0);
+        assertFalse(validator.validate(overlongWarning).isEmpty());
+        assertFalse(tooManyWarnings.areCollectionsWithinLimits());
     }
 
     private void assertHashChanges(WorkerResultRequest baseline, WorkerResultRequest changed) {

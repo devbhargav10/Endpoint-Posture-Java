@@ -61,6 +61,14 @@ public record WorkerResultRequest(
         return bytes <= MAX_DIAGNOSTIC_TEXT_BYTES;
     }
 
+    /** Rechecked by the service so non-HTTP callers receive the same bounds as validated requests. */
+    public boolean areCollectionsWithinLimits() {
+        if (errors == null || warnings == null || errors.size() > 100 || warnings.size() > 100) return false;
+        for (String value : errors) if (value == null || value.length() > 4096) return false;
+        for (String value : warnings) if (value == null || value.length() > 4096) return false;
+        return areDiagnosticsWithinLimit();
+    }
+
     /**
      * SHA-256 over every envelope field. Object keys are recursively sorted,
      * while array order and scalar values are preserved.

@@ -85,6 +85,16 @@ app:
     fleet-list-max-endpoints: 2000
 
   workers:
+    # The unauthenticated bucket only charges missing/invalid credentials so workers
+    # behind shared NAT addresses use independent authenticated worker buckets.
+    # Buckets are per backend replica; enforce cluster-wide ceilings at the ingress proxy.
+    ingress:
+      unauthenticated-ip-capacity: ${WORKER_UNAUTH_IP_CAPACITY:120}
+      unauthenticated-ip-refill-tokens: ${WORKER_UNAUTH_IP_REFILL_TOKENS:120}
+      unauthenticated-ip-refill-duration-seconds: ${WORKER_UNAUTH_IP_REFILL_SECONDS:60}
+      authenticated-worker-capacity: ${WORKER_RATE_CAPACITY:600}
+      authenticated-worker-refill-tokens: ${WORKER_RATE_REFILL_TOKENS:600}
+      authenticated-worker-refill-duration-seconds: ${WORKER_RATE_REFILL_SECONDS:60}
     lease-seconds: ${WORKER_LEASE_SECONDS:300}
     # PR5.1: workers heartbeat at this interval; silent longer than stale-after => STALE (must be >= 2x interval).
     # PR5.2: largest lease extension a worker may request per renewal (never below lease-seconds).

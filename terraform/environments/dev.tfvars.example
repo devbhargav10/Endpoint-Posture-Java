@@ -1,0 +1,20 @@
+environment                     = "dev"
+aws_region                      = "ap-south-1" # Example only; choose the deployment region.
+vpc_cidr                        = "10.40.0.0/16" # Confirm no overlap with VPN-connected sites.
+public_subnet_cidrs             = ["10.40.0.0/24", "10.40.1.0/24"]
+application_subnet_cidrs        = ["10.40.10.0/24", "10.40.11.0/24"]
+data_subnet_cidrs               = ["10.40.20.0/24", "10.40.21.0/24"]
+edge_ingress_cidrs              = []
+nat_gateway_enabled             = false
+nat_gateway_per_az              = false
+postgres_engine_version         = "16.9" # Example only; check RDS engine versions in the chosen region.
+postgres_instance_class         = "db.t4g.micro" # Confirm engine/class availability and workload sizing.
+postgres_allocated_storage      = 20
+postgres_max_allocated_storage  = 100
+postgres_backup_retention_days  = 7
+postgres_multi_az               = false
+postgres_deletion_protection    = true
+postgres_skip_final_snapshot    = false
+tags = {
+  Owner = "platform"
+}

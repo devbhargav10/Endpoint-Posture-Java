@@ -75,8 +75,8 @@ export function StatusBadge({
 
   if (variant === "inline") {
     return (
-      <span className="inline-flex items-center gap-1.5 text-xs font-medium">
-        <span className={`h-1.5 w-1.5 rounded-full ${tone.dot}`} />
+      <span className="inline-flex items-center gap-1.5 text-xs font-medium" role="status" aria-label={label}>
+        <span aria-hidden="true" className={`h-1.5 w-1.5 rounded-full ${tone.dot}`} />
         <span className={tone.text}>{label}</span>
       </span>
     );
@@ -86,9 +86,11 @@ export function StatusBadge({
 
   return (
     <span
+      role="status"
+      aria-label={label}
       className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium ${tone.bg} ${tone.text} ${tone.border}`}
     >
-      <span className="relative flex h-1.5 w-1.5">
+      <span aria-hidden="true" className="relative flex h-1.5 w-1.5">
         {isRunning && (
           <span className={`absolute inline-flex h-full w-full animate-ping rounded-full opacity-75 ${tone.dot}`} />
         )}

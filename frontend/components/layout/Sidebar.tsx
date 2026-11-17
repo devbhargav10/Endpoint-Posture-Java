@@ -121,13 +121,31 @@ function SystemStatus() {
   );
 }
 
-export function Sidebar() {
+export function Sidebar({
+  mobileOpen,
+  onClose,
+}: {
+  mobileOpen: boolean;
+  onClose: () => void;
+}) {
   const pathname = usePathname();
 
   return (
-    <aside className="flex h-screen w-64 flex-shrink-0 flex-col border-r border-border bg-panel2">
+    <>
+      {mobileOpen && (
+        <button
+          type="button"
+          className="fixed inset-0 z-40 bg-black/60 md:hidden"
+          aria-label="Close navigation menu"
+          onClick={onClose}
+        />
+      )}
+      <aside
+        className={`fixed inset-y-0 left-0 z-50 flex h-dvh w-72 flex-shrink-0 flex-col border-r border-border bg-panel2 transition-transform md:relative md:h-screen md:w-64 md:translate-x-0 ${mobileOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"}`}
+      >
       <Link
         href="/overview"
+        onClick={onClose}
         className="flex items-center gap-3 border-b border-border px-5 py-5 transition hover:bg-ink/[0.03]"
       >
         <div className="relative flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-accent/15 text-accent shadow-sm">
@@ -143,7 +161,7 @@ export function Sidebar() {
         </div>
       </Link>
 
-      <nav className="flex-1 space-y-6 overflow-y-auto px-4 py-5">
+      <nav id="primary-navigation" aria-label="Primary navigation" className="flex-1 space-y-6 overflow-y-auto px-4 py-5">
         {NAV_SECTIONS.map((sec) => (
           <div key={sec.title}>
             <div className="mb-2 px-2 text-[10px] font-semibold uppercase tracking-wider text-muted/70">
@@ -160,6 +178,8 @@ export function Sidebar() {
                     <Link
                       key={item.href}
                       href={item.href}
+                      onClick={onClose}
+                      aria-current={active ? "page" : undefined}
                       className={`group relative flex items-center gap-2.5 rounded-lg px-3 py-2.5 text-xs font-medium transition ${
                         active
                           ? "bg-accent/15 text-accent shadow-sm"
@@ -182,6 +202,7 @@ export function Sidebar() {
       <div className="border-t border-border bg-panel/30">
         <SystemStatus />
       </div>
-    </aside>
+      </aside>
+    </>
   );
 }

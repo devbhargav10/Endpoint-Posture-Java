@@ -1,52 +1,80 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import type { KeyboardEvent, RefObject } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Search, ChevronDown, LogOut, Monitor, ExternalLink } from "lucide-react";
-import { api, clearToken, EndpointResponse } from "@/lib/api";
-import { clearCurrentUser, getCurrentUser, initials, CurrentUser } from "@/lib/auth";
+import { ChevronDown, ExternalLink, LogOut, Menu, Monitor, Search, X } from "lucide-react";
+import { api, clearToken, type EndpointResponse } from "@/lib/api";
+import { clearCurrentUser, getCurrentUser, initials, type CurrentUser } from "@/lib/auth";
 import { ThemeToggle } from "./ThemeToggle";
 import { ConnectionDot } from "../ui/ConnectionDot";
 
-export function Topbar() {
+type SearchState = "idle" | "loading" | "ready" | "error";
+
+export function Topbar({
+  navigationOpen,
+  onToggleNavigation,
+  menuButtonRef,
+}: {
+  navigationOpen: boolean;
+  onToggleNavigation: () => void;
+  menuButtonRef: RefObject<HTMLButtonElement | null>;
+}) {
   const router = useRouter();
   const [user, setUser] = useState<CurrentUser | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [searchResults, setSearchResults] = useState<EndpointResponse[]>([]);
   const [searchFocused, setSearchFocused] = useState(false);
+  const [searchState, setSearchState] = useState<SearchState>("idle");
 
   const menuRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setUser(getCurrentUser());
   }, []);
 
   useEffect(() => {
-    function onClickOutside(e: MouseEvent) {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setMenuOpen(false);
-      }
-      if (searchRef.current && !searchRef.current.contains(e.target as Node)) {
-        setSearchFocused(false);
-      }
+    function onClickOutside(event: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) setMenuOpen(false);
+      if (searchRef.current && !searchRef.current.contains(event.target as Node)) setSearchFocused(false);
     }
     document.addEventListener("mousedown", onClickOutside);
     return () => document.removeEventListener("mousedown", onClickOutside);
   }, []);
 
   useEffect(() => {
-    const q = searchTerm.trim();
-    if (!q) {
+    const query = searchTerm.trim();
+    if (!query) {
       setSearchResults([]);
+      setSearchState("idle");
       return;
     }
-    const t = setTimeout(() => {
-      api.endpointsPage({ q, size: 5 }).then((r) => setSearchResults(r.items)).catch(() => setSearchResults([]));
+
+    let cancelled = false;
+    setSearchState("loading");
+    const timer = window.setTimeout(() => {
+      api
+        .endpointsPage({ q: query, size: 5 })
+        .then((result) => {
+          if (cancelled) return;
+          setSearchResults(result.items);
+          setSearchState("ready");
+        })
+        .catch(() => {
+          if (cancelled) return;
+          setSearchResults([]);
+          setSearchState("error");
+        });
     }, 250);
-    return () => clearTimeout(t);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
   }, [searchTerm]);
 
   function signOut() {
@@ -55,105 +83,156 @@ export function Topbar() {
     router.push("/login");
   }
 
-  const displayName = user?.username ?? "Security Admin";
-  const displayRole = user?.role ?? "Operator";
+  function onSearchKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key === "Escape") {
+      setSearchFocused(false);
+      searchInputRef.current?.blur();
+    }
+    if (event.key === "ArrowDown" && searchState === "ready" && searchResults.length > 0) {
+      event.preventDefault();
+      searchRef.current?.querySelector<HTMLAnchorElement>("a[href]")?.focus();
+    }
+  }
+
+  const displayName = user?.username ?? "Account";
 
   return (
-    <header className="relative z-40 flex h-14 items-center justify-between border-b border-border bg-base/80 px-6 backdrop-blur">
-      {/* Search Input with Live Dropdown */}
-      <div className="relative w-80 sm:w-96" ref={searchRef}>
-        <Search
-          size={15}
-          className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted"
-        />
-        <input
-          type="text"
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          onFocus={() => setSearchFocused(true)}
-          placeholder="Quick search endpoints by MAC, IP, host…"
-          className="w-full rounded-lg border border-border bg-panel py-1.5 pl-9 pr-3 text-xs text-ink placeholder:text-muted outline-none transition focus:border-accent"
-        />
+    <header className="sticky top-0 z-30 flex h-14 items-center justify-between gap-3 border-b border-border bg-base/95 px-4 backdrop-blur sm:px-6">
+      <div className="flex min-w-0 flex-1 items-center gap-3">
+        <button
+          ref={menuButtonRef}
+          type="button"
+          onClick={onToggleNavigation}
+          aria-label={navigationOpen ? "Close navigation" : "Open navigation"}
+          aria-expanded={navigationOpen}
+          aria-controls="primary-navigation"
+          className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-md border border-border bg-panel text-ink md:hidden"
+        >
+          {navigationOpen ? <X size={18} aria-hidden="true" /> : <Menu size={18} aria-hidden="true" />}
+        </button>
 
-        {searchFocused && searchTerm.trim() && (
-          <div className="absolute left-0 top-11 z-50 w-full overflow-hidden rounded-xl border border-border bg-panel shadow-lg">
-            <div className="border-b border-border/60 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted">
-              Matching Devices ({searchResults.length})
-            </div>
-            {searchResults.length === 0 ? (
-              <div className="p-3 text-center text-xs text-muted">
-                No matching endpoint found.
+        <div className="relative min-w-0 w-full max-w-md" ref={searchRef}>
+          <Search
+            size={15}
+            aria-hidden="true"
+            className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted"
+          />
+          <label className="sr-only" htmlFor="endpoint-search">
+            Search endpoints by hostname, MAC address, or IP address
+          </label>
+          <input
+            ref={searchInputRef}
+            id="endpoint-search"
+            type="search"
+            role="combobox"
+            value={searchTerm}
+            onChange={(event) => setSearchTerm(event.target.value)}
+            onFocus={() => setSearchFocused(true)}
+            onKeyDown={onSearchKeyDown}
+            aria-expanded={searchFocused && Boolean(searchTerm.trim())}
+            aria-controls="endpoint-search-results"
+            placeholder="Search endpoints by host, MAC or IP…"
+            className="min-h-10 w-full rounded-md border border-border bg-panel py-2 pl-9 pr-3 text-sm text-ink placeholder:text-muted"
+          />
+
+          {searchFocused && searchTerm.trim() && (
+            <div
+              id="endpoint-search-results"
+              className="absolute left-0 top-12 z-50 max-h-[min(70vh,28rem)] w-full overflow-y-auto rounded-lg border border-border bg-panel shadow-xl"
+            >
+              <div className="border-b border-border px-3 py-2 text-xs font-semibold text-muted">
+                Endpoint search results
               </div>
-            ) : (
-              <div className="divide-y divide-border/40">
-                {searchResults.map((ep) => (
-                  <Link
-                    key={ep.id}
-                    href={`/endpoints/${ep.id}`}
-                    onClick={() => {
-                      setSearchFocused(false);
-                      setSearchTerm("");
-                    }}
-                    className="flex items-center justify-between p-2.5 hover:bg-ink/[0.04]"
-                  >
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <Monitor size={13} className="text-accent" />
-                        <span className="truncate text-xs font-semibold text-ink">
-                          {ep.hostname ?? ep.macAddress}
+              {searchState === "loading" && (
+                <p className="p-3 text-sm text-muted" role="status">
+                  Searching endpoints…
+                </p>
+              )}
+              {searchState === "error" && (
+                <p className="p-3 text-sm text-bad" role="alert">
+                  Search failed. Try again.
+                </p>
+              )}
+              {searchState === "ready" && searchResults.length === 0 && (
+                <p className="p-3 text-sm text-muted" role="status">
+                  No matching endpoints.
+                </p>
+              )}
+              {searchState === "ready" && searchResults.length > 0 && (
+                <ul aria-label="Matching endpoints" className="divide-y divide-border/60">
+                  {searchResults.map((endpoint) => (
+                    <li key={endpoint.id}>
+                      <Link
+                        href={`/endpoints/${endpoint.id}`}
+                        onClick={() => {
+                          setSearchFocused(false);
+                          setSearchTerm("");
+                        }}
+                        className="flex min-h-14 items-center justify-between gap-3 px-3 py-2 hover:bg-ink/[0.04]"
+                      >
+                        <span className="flex min-w-0 items-start gap-2">
+                          <Monitor size={15} aria-hidden="true" className="mt-0.5 flex-shrink-0 text-accent" />
+                          <span className="min-w-0">
+                            <span className="block truncate text-sm font-semibold text-ink">
+                              {endpoint.hostname ?? endpoint.macAddress}
+                            </span>
+                            <span className="block break-all font-mono text-xs text-muted">
+                              {endpoint.ipAddress ?? "No IP"} · {endpoint.macAddress}
+                            </span>
+                          </span>
                         </span>
-                      </div>
-                      <div className="font-mono text-[10px] text-muted">
-                        {ep.ipAddress ?? "No IP"} · {ep.macAddress}
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <ConnectionDot connected={ep.connected} />
-                      <ExternalLink size={12} className="text-muted" />
-                    </div>
-                  </Link>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
+                        <span className="flex flex-shrink-0 items-center gap-2">
+                          <ConnectionDot connected={endpoint.connected} />
+                          <ExternalLink size={13} aria-hidden="true" className="text-muted" />
+                        </span>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
-      {/* Right controls: Theme switcher & Operator Profile */}
-      <div className="flex items-center gap-3">
+      <div className="flex flex-shrink-0 items-center gap-2 sm:gap-3">
         <ThemeToggle />
-
-        {/* User Profile */}
         <div className="relative" ref={menuRef}>
           <button
-            onClick={() => setMenuOpen((v) => !v)}
-            className="flex items-center gap-2.5 rounded-lg border border-border/80 bg-panel px-2 py-1 transition hover:border-accent/40"
+            type="button"
+            onClick={() => setMenuOpen((open) => !open)}
+            aria-expanded={menuOpen}
+            aria-haspopup="menu"
+            className="flex min-h-10 items-center gap-2 rounded-md border border-border bg-panel px-2 text-sm text-ink hover:border-accent/40"
           >
-            <div className="flex h-7 w-7 items-center justify-center rounded-md bg-accent/15 text-xs font-bold text-accent">
+            <span
+              aria-hidden="true"
+              className="flex h-7 w-7 items-center justify-center rounded-md bg-accent/15 text-xs font-bold text-accent"
+            >
               {initials(displayName)}
-            </div>
-            <div className="hidden text-left leading-tight sm:block">
-              <div className="text-xs font-semibold text-ink">{displayName}</div>
-              <div className="text-[10px] text-muted capitalize">{displayRole}</div>
-            </div>
-            <ChevronDown size={13} className="text-muted" />
+            </span>
+            <span className="hidden max-w-36 truncate text-left font-medium sm:block">{displayName}</span>
+            <ChevronDown size={14} aria-hidden="true" className="text-muted" />
           </button>
 
           {menuOpen && (
-            <div className="absolute right-0 top-11 z-50 w-48 overflow-hidden rounded-xl border border-border bg-panel shadow-xl">
-              <div className="border-b border-border/60 p-3">
-                <div className="text-xs font-semibold text-ink">{displayName}</div>
-                <div className="text-[10px] text-muted">Continuous Compliance Operator</div>
-              </div>
-              <div className="p-1">
-                <button
-                  onClick={signOut}
-                  className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-medium text-bad hover:bg-bad/10 transition"
-                >
-                  <LogOut size={14} />
-                  Sign out session
-                </button>
-              </div>
+            <div
+              role="menu"
+              aria-label="Account menu"
+              className="absolute right-0 top-12 z-50 w-48 overflow-hidden rounded-lg border border-border bg-panel shadow-xl"
+            >
+              {user?.role && (
+                <p className="border-b border-border px-3 py-2 text-xs text-muted">Role: {user.role}</p>
+              )}
+              <button
+                type="button"
+                role="menuitem"
+                onClick={signOut}
+                className="flex min-h-11 w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium text-bad hover:bg-bad/10"
+              >
+                <LogOut size={15} aria-hidden="true" />
+                Sign out
+              </button>
             </div>
           )}
         </div>

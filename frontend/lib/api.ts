@@ -1,3 +1,5 @@
+import { clearCurrentUser } from "@/lib/auth";
+
 export interface EndpointResponse {
   id: string;
   macAddress: string;
@@ -343,51 +345,83 @@ export interface EndpointBrief {
   ipAddress: string | null;
 }
 
-export async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const token = getToken();
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly body: unknown = null,
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
 
-  const res = await fetch(path, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(init?.headers ?? {}),
-    },
-  });
+async function readResponseBody(response: Response): Promise<unknown> {
+  const text = await response.text();
+  if (!text) return null;
+
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return text;
+  }
+}
+
+function responseMessage(body: unknown, fallback: string): string {
+  if (typeof body === "string" && body.trim()) return body;
+  if (body && typeof body === "object") {
+    const record = body as Record<string, unknown>;
+    if (typeof record.message === "string" && record.message.trim()) return record.message;
+    if (typeof record.error === "string" && record.error.trim()) return record.error;
+  }
+  return fallback;
+}
+
+export async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const token = getToken();
+  const headers = new Headers(init.headers);
+  const isFormData = typeof FormData !== "undefined" && init.body instanceof FormData;
+
+  headers.set("Accept", "application/json");
+  if (init.body != null && !isFormData && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
+  if (token && !headers.has("Authorization")) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
+
+  let res: Response;
+  try {
+    res = await fetch(path, { ...init, headers });
+  } catch {
+    throw new ApiError("Could not connect to the backend. Check the connection and try again.", 0);
+  }
 
   if (res.status === 401) {
     if (path === "/api/v1/auth/login") {
-      throw new Error(
+      throw new ApiError(
         "Invalid username or password. Accounts are locked for a few minutes after repeated failed attempts.",
+        res.status,
       );
     }
 
     clearToken();
+    clearCurrentUser();
 
     if (typeof window !== "undefined") {
       window.location.href = "/login";
     }
 
-    throw new Error("Unauthorized");
+    throw new ApiError("Your session has expired. Sign in again.", res.status);
   }
 
-  if (res.status === 403) {
-    throw new Error("Your role does not allow this action");
-  }
-
+  const body = await readResponseBody(res);
   if (!res.ok) {
-    const body = await res.json().catch(() => null);
-
-    throw new Error(
-      body?.message ?? body?.error ?? `Request failed: ${res.status}`,
-    );
+    const fallback = res.status === 403 ? "Your role does not allow this action" : `Request failed: ${res.status}`;
+    throw new ApiError(responseMessage(body, fallback), res.status, body);
   }
 
-  if (res.status === 204) {
-    return null as T;
-  }
-
-  return res.json();
+  return body as T;
 }
 
 export const api = {
@@ -661,43 +695,14 @@ export const api = {
     }),
 
   resetPassword: (id: string, password: string) =>
-    fetch(`/api/v1/users/${id}/password`, {
+    request<null>(`/api/v1/users/${id}/password`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${getToken()}`,
-      },
       body: JSON.stringify({ password }),
-    }).then(async (r) => {
-      if (r.status === 403) {
-        throw new Error("Your role does not allow this action");
-      }
-
-      if (!r.ok) {
-        throw new Error(
-          (await r.json().catch(() => null))?.message ??
-            `Request failed: ${r.status}`,
-        );
-      }
     }),
 
   deleteUser: (id: string) =>
-    fetch(`/api/v1/users/${id}`, {
+    request<null>(`/api/v1/users/${id}`, {
       method: "DELETE",
-      headers: {
-        Authorization: `Bearer ${getToken()}`,
-      },
-    }).then(async (r) => {
-      if (r.status === 403) {
-        throw new Error("Your role does not allow this action");
-      }
-
-      if (!r.ok) {
-        throw new Error(
-          (await r.json().catch(() => null))?.message ??
-            `Request failed: ${r.status}`,
-        );
-      }
     }),
 
   // ── Warranty ────────────────────────────────────────────────────────────────
@@ -705,31 +710,13 @@ export const api = {
   listWarranty: () => request<WarrantyView[]>("/api/v1/warranty"),
 
   uploadWarrantyCsv: (file: File): Promise<WarrantyUploadResult> => {
-    const token = getToken();
     const form = new FormData();
 
     form.append("file", file);
 
-    return fetch("/api/v1/warranty/upload", {
+    return request<WarrantyUploadResult>("/api/v1/warranty/upload", {
       method: "POST",
-      headers: token
-        ? {
-            Authorization: `Bearer ${token}`,
-          }
-        : {},
       body: form,
-    }).then(async (r) => {
-      if (r.status === 403) {
-        throw new Error("Your role does not allow this action");
-      }
-
-      if (!r.ok) {
-        const body = await r.json().catch(() => null);
-
-        throw new Error(body?.message ?? `Upload failed: ${r.status}`);
-      }
-
-      return r.json() as Promise<WarrantyUploadResult>;
     });
   },
 };

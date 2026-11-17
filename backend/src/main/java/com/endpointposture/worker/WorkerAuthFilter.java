@@ -1,5 +1,6 @@
 package com.endpointposture.worker;
 import com.endpointposture.security.LoginRateLimiter;
+import org.springframework.beans.factory.annotation.Value;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -22,9 +23,19 @@ public class WorkerAuthFilter extends OncePerRequestFilter {
     private static final String PREFIX="/api/v1/workers/";
     private final WorkerRegistryService registry;
     private final WorkerAuditService audit;
-    // Apply before the indexed hash lookup, so invalid-key floods cannot reach the database unbounded.
-    private final LoginRateLimiter requestLimiter=new LoginRateLimiter(true,6000,6000,60);
-    public WorkerAuthFilter(WorkerRegistryService registry,WorkerAuditService audit){this.registry=registry;this.audit=audit;}
+    private final LoginRateLimiter unauthenticatedIpLimiter;
+    private final LoginRateLimiter workerLimiter;
+    public WorkerAuthFilter(WorkerRegistryService registry, WorkerAuditService audit,
+            @Value("${app.workers.ingress.unauthenticated-ip-capacity:120}") int ipCapacity,
+            @Value("${app.workers.ingress.unauthenticated-ip-refill-tokens:120}") int ipRefill,
+            @Value("${app.workers.ingress.unauthenticated-ip-refill-duration-seconds:60}") long ipRefillSeconds,
+            @Value("${app.workers.ingress.authenticated-worker-capacity:600}") int workerCapacity,
+            @Value("${app.workers.ingress.authenticated-worker-refill-tokens:600}") int workerRefill,
+            @Value("${app.workers.ingress.authenticated-worker-refill-duration-seconds:60}") long workerRefillSeconds) {
+        this.registry=registry; this.audit=audit;
+        this.unauthenticatedIpLimiter=new LoginRateLimiter(true,ipCapacity,ipRefill,ipRefillSeconds);
+        this.workerLimiter=new LoginRateLimiter(true,workerCapacity,workerRefill,workerRefillSeconds);
+    }
     @Override protected boolean shouldNotFilter(@NonNull HttpServletRequest req){
         String uri=req.getRequestURI(); return !uri.startsWith(PREFIX)||ENROLL_PATH.equals(uri);
     }
@@ -32,19 +43,33 @@ public class WorkerAuthFilter extends OncePerRequestFilter {
                                                @NonNull FilterChain chain)throws ServletException,IOException{
         String key=req.getHeader(HEADER);
         if(key==null)key=req.getHeader(ALT_HEADER);
-        if(key==null){chain.doFilter(req,res);return;}
         String ip=req.getRemoteAddr();
-        if(!requestLimiter.tryAcquire(ip)){res.setStatus(429);res.setContentType("text/plain");res.getWriter().write("Too many requests");return;}
+        // Count missing and malformed credentials before continuing; valid worker traffic
+        // is charged only to its worker bucket, so a shared NAT does not combine quotas.
+        if(key==null){
+            if(!unauthenticatedIpLimiter.tryAcquire(ip)){tooMany(res);return;}
+            chain.doFilter(req,res);return;
+        }
+        if(!WorkerCredentials.looksLikeKey(key) && !unauthenticatedIpLimiter.tryAcquire(ip)){
+            tooMany(res);return;
+        }
         WorkerRegistryService.AuthResult result=WorkerCredentials.looksLikeKey(key)?registry.authenticate(key):
           new WorkerRegistryService.AuthResult(WorkerRegistryService.Status.UNKNOWN_KEY,null,null,null);
         if(result.status()==WorkerRegistryService.Status.OK){
+            if(!workerLimiter.tryAcquire(result.workerId().toString())){tooMany(res);return;}
             SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(
               result.principal(),null,List.of(new SimpleGrantedAuthority("ROLE_WORKER"))));
             chain.doFilter(req,res);return;
+        }
+        if(WorkerCredentials.looksLikeKey(key) && !unauthenticatedIpLimiter.tryAcquire(ip)){
+            tooMany(res);return;
         }
         boolean revoked=result.status()==WorkerRegistryService.Status.REVOKED;
         audit.record(revoked?"AUTH_REVOKED":"AUTH_FAILED",result.workerId(),result.name(),
           revoked?"Revoked worker key presented":"Unknown or malformed worker key",ip);
         res.setStatus(HttpServletResponse.SC_UNAUTHORIZED);res.setContentType("text/plain");res.getWriter().write("Invalid worker key");
+    }
+    private static void tooMany(HttpServletResponse res)throws IOException{
+        res.setStatus(429);res.setContentType("text/plain");res.getWriter().write("Too many requests");
     }
 }
