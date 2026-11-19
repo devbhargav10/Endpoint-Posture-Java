@@ -116,6 +116,15 @@ class IseFeedServiceTest {
     }
 
     @Test
+    void theIngestionBatchLimitRemainsFiftyThousand() {
+        rules.replaceActive(Scope.CONNECTED, "admin");
+
+        Feed result = feed.fetch(0, Integer.MAX_VALUE, "ise-feed");
+
+        assertEquals(50_000, result.size());
+    }
+
+    @Test
     void changingTheRuleCreatesOneNewVersionAndReselectingTheSameScopeCreatesNone() {
         Rule v2 = rules.replaceActive(Scope.CONNECTED, "alice");
         Rule same = rules.replaceActive(Scope.CONNECTED, "bob");

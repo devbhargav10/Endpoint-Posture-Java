@@ -56,7 +56,12 @@ public class WarrantyService {
 
     @Transactional(readOnly = true)
     public List<WarrantyRecord> listAll() {
-        return listAll(0, ApiPaging.DEFAULT_SIZE);
+        return repo.findAllByOrderByUploadedAtDescIdDesc();
+    }
+
+    @Transactional(readOnly = true)
+    public long count() {
+        return repo.count();
     }
 
     @Transactional(readOnly = true)

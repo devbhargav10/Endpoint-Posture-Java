@@ -7,7 +7,7 @@ const __dirname = fileURLToPath(new URL(".", import.meta.url));
 export default defineConfig({
   test: {
     environment: "node",
-    include: ["lib/**/*.test.{ts,tsx}", "components/**/*.test.{ts,tsx}"],
+    include: ["lib/**/*.test.{ts,tsx}", "components/**/*.test.{ts,tsx}", "app/**/*.test.{ts,tsx}"],
   },
   resolve: {
     alias: {

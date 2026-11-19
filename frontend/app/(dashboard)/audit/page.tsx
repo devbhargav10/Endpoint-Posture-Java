@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   History,
@@ -16,6 +16,7 @@ import {
 import { api, IseActionAudit } from "@/lib/api";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { Column, DataTable } from "@/components/ui/DataTable";
+import { PageResponse } from "@/lib/api";
 
 const columns: Column<IseActionAudit>[] = [
   {
@@ -104,55 +105,55 @@ const columns: Column<IseActionAudit>[] = [
 export default function AuditPage() {
   const [rows, setRows] = useState<IseActionAudit[] | null>(null);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const requestSequence = useRef(0);
+  const [pageResult, setPageResult] = useState<PageResponse<IseActionAudit> | null>(null);
+  const [summary, setSummary] = useState<{ total: number; sharePosture: number; restrict: number; succeeded: number } | null>(null);
   const [q, setQ] = useState("");
   const [actionFilter, setActionFilter] = useState<string>("ALL");
   const [resultFilter, setResultFilter] = useState<string>("ALL");
 
-  const loadData = async () => {
+  const loadData = useCallback(async (page = 0, append = false) => {
+    const sequence = ++requestSequence.current;
     setLoading(true);
     try {
-      const data = await api.auditActions();
-      setRows(data);
-    } catch {
-      setRows([]);
+      const [data, stats] = await Promise.all([
+        api.auditActionsPage({ page, size: 25, actionType: actionFilter, succeeded: resultFilter === "ALL" ? undefined : resultFilter === "SUCCESS", q }),
+        api.auditSummary(),
+      ]);
+      if (sequence !== requestSequence.current) return;
+      setError(null);
+      setPageResult(data);
+      setRows((previous) => {
+        if (!append || !previous) return data.items;
+        const known = new Set(previous.map((row) => row.id));
+        return [...previous, ...data.items.filter((row) => !known.has(row.id))];
+      });
+      setSummary(stats);
+    } catch (e) {
+      if (sequence === requestSequence.current) {
+        setError(e instanceof Error ? e.message : "Could not load the audit log.");
+        setRows((previous) => previous ?? []);
+      }
     } finally {
-      setLoading(false);
+      if (sequence === requestSequence.current) setLoading(false);
     }
-  };
+  }, [actionFilter, resultFilter, q]);
 
   useEffect(() => {
-    loadData();
-  }, []);
+    const timer = setTimeout(() => { void loadData(); }, q ? 250 : 0);
+    return () => clearTimeout(timer);
+  }, [loadData]);
 
   const stats = useMemo(() => {
-    const list = rows ?? [];
-    const total = list.length;
-    const shareCount = list.filter((r) => r.actionType === "SHARE_POSTURE").length;
-    const restrictCount = list.filter((r) => r.actionType === "RESTRICT").length;
-    const successCount = list.filter((r) => r.succeeded).length;
-    const successRate = total === 0 ? 100 : Math.round((successCount / total) * 100);
-    return { total, shareCount, restrictCount, successRate };
-  }, [rows]);
+    const total = summary?.total ?? 0;
+    const successRate = total === 0 ? 100 : Math.round(((summary?.succeeded ?? 0) / total) * 100);
+    return { total, shareCount: summary?.sharePosture ?? 0, restrictCount: summary?.restrict ?? 0, successRate };
+  }, [summary]);
 
   const shown = useMemo(() => {
-    if (!rows) return null;
-    return rows.filter((r) => {
-      if (actionFilter !== "ALL" && r.actionType !== actionFilter) return false;
-      if (resultFilter === "SUCCESS" && !r.succeeded) return false;
-      if (resultFilter === "FAILED" && r.succeeded) return false;
-
-      if (q.trim()) {
-        const query = q.toLowerCase();
-        const matches =
-          r.actionType.toLowerCase().includes(query) ||
-          r.operator?.toLowerCase().includes(query) ||
-          r.detail?.toLowerCase().includes(query) ||
-          r.endpointId?.toLowerCase().includes(query);
-        if (!matches) return false;
-      }
-      return true;
-    });
-  }, [rows, actionFilter, resultFilter, q]);
+    return rows;
+  }, [rows]);
 
   return (
     <div className="space-y-6">
@@ -167,7 +168,7 @@ export default function AuditPage() {
 
         <div className="flex items-center gap-2.5">
           <button
-            onClick={loadData}
+            onClick={() => void loadData()}
             disabled={loading}
             className="flex items-center gap-1.5 rounded-lg border border-border bg-panel px-3 py-1.5 text-xs font-medium text-ink transition hover:border-accent/40 disabled:opacity-50"
           >
@@ -254,6 +255,12 @@ export default function AuditPage() {
       </div>
 
       {/* Audit Table (paginated + CSV) */}
+      {error && (
+        <div role="alert" className="flex items-center justify-between rounded-lg border border-bad/30 bg-bad/10 px-4 py-2 text-xs text-bad">
+          <span>{error}</span>
+          <button onClick={() => void loadData()} className="underline">Retry</button>
+        </div>
+      )}
       <DataTable<IseActionAudit>
         rows={shown}
         columns={columns}
@@ -262,8 +269,15 @@ export default function AuditPage() {
         loadingMessage="Loading ISE audit log…"
         emptyMessage="No matching audit records found. Actions appear here unconditionally as Share Posture or Restrict commands are executed."
         minWidth={860}
-        toolbarLeft={shown ? `${shown.length} matching record${shown.length === 1 ? "" : "s"}` : undefined}
+        toolbarLeft={pageResult ? `${pageResult.total} matching record${pageResult.total === 1 ? "" : "s"}` : undefined}
       />
+      {pageResult && rows && rows.length < pageResult.total && (
+        <div className="flex justify-center">
+          <button disabled={loading} onClick={() => void loadData(pageResult.page + 1, true)} className="rounded-lg border border-border px-4 py-2 text-xs text-ink disabled:opacity-50">
+            {loading ? "Loading…" : "Load older actions"}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

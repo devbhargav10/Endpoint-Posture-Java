@@ -1,6 +1,7 @@
 package com.endpointposture.ise;
 
 import com.endpointposture.ise.dto.IseActionStateResponse;
+import com.endpointposture.endpoint.dto.PageResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -25,11 +26,20 @@ public class IseActionStateController {
         this.service = service;
     }
 
-    @Operation(summary = "Latest RESTRICT or CLEAR_RESTRICTION action per endpoint")
+    @Operation(summary = "Latest enforcement action per endpoint (legacy array)")
     @GetMapping("/state")
     public List<IseActionStateResponse> getEnforcementStates(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "100") int size) {
         return service.getLatestEnforcementStates(page, size);
+    }
+
+    @Operation(summary = "Page through latest enforcement state per endpoint",
+            description = "Zero-based page; size defaults to 100 and is capped at 500. Sorted by endpoint ID.")
+    @GetMapping("/state/page")
+    public PageResponse<IseActionStateResponse> getEnforcementStatesPage(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "100") int size) {
+        return service.getLatestEnforcementStatesPage(page, size);
     }
 }

@@ -21,6 +21,8 @@ public interface WarrantyRecordRepository extends JpaRepository<WarrantyRecord, 
 
     List<WarrantyRecord> findBySerialNumberOrderByUploadedAtDesc(String serialNumber);
 
+    List<WarrantyRecord> findAllByOrderByUploadedAtDescIdDesc();
+
     List<WarrantyRecord> findAllByOrderByUploadedAtDescIdDesc(Pageable pageable);
 
     @Query("SELECT COUNT(DISTINCT w.serialNumber) FROM WarrantyRecord w")

@@ -104,7 +104,13 @@ public class SecurityIndicatorService {
 
     @Transactional(readOnly = true)
     public List<SecurityIndicatorResponse> history(UUID endpointId) {
-        return history(endpointId, 0, ApiPaging.DEFAULT_SIZE);
+        return repository.findByEndpointIdOrderByCollectedAtDescIdDesc(endpointId).stream()
+                .map(this::toResponse).toList();
+    }
+
+    @Transactional(readOnly = true)
+    public long historyCount(UUID endpointId) {
+        return repository.countByEndpointId(endpointId);
     }
 
     @Transactional(readOnly = true)

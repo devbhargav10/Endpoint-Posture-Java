@@ -22,6 +22,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.List;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -86,6 +87,57 @@ class IseFeedRbacTest {
         }
     }
 
+    @Test
+    void previewRequiresAdminAndUsesItsOwnPageSizeCap() throws Exception {
+        String preview = FEED + "/preview";
+        int anonymous = statusOf(MockMvcRequestBuilders.get(preview));
+        assertTrue(anonymous == 401 || anonymous == 403);
+        for (String role : List.of("VIEWER", "ANALYST", "OPERATOR")) {
+            assertEquals(403, statusOf(MockMvcRequestBuilders.get(preview)
+                    .with(SecurityMockMvcRequestPostProcessors.user("u").roles(role))), role);
+        }
+        mvc.perform(MockMvcRequestBuilders.get(preview).param("size", "50000")
+                        .with(SecurityMockMvcRequestPostProcessors.user("root").roles("ADMIN")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.size").value(500));
+        mvc.perform(MockMvcRequestBuilders.get(FEED).param("size", "50000")
+                        .header("Authorization", basic("ise-feed", "feed-test-password")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.size").value(50000));
+    }
+
+    @Test
+    void auditPageAcceptsUnfilteredPostgresQuery() throws Exception {
+        mvc.perform(MockMvcRequestBuilders.get("/api/v1/audit/ise-actions/page")
+                        .with(SecurityMockMvcRequestPostProcessors.user("root").roles("ADMIN")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items").isArray())
+                .andExpect(jsonPath("$.total").value(0));
+    }
+
+    @Test
+    void filteredAuditPaginationReturnsMatchingRowsAndFilteredTotals() throws Exception {
+        UUID endpointId = jdbc.queryForObject(
+                "INSERT INTO endpoint (mac_address) VALUES (?) RETURNING id", UUID.class, "F0:00:00:00:00:02");
+        jdbc.update("INSERT INTO ise_action_audit (endpoint_id, action_type, operator, succeeded, detail, occurred_at) VALUES (?, 'RESTRICT', 'root', false, 'failure one', now() - interval '2 seconds')", endpointId);
+        jdbc.update("INSERT INTO ise_action_audit (endpoint_id, action_type, operator, succeeded, detail, occurred_at) VALUES (?, 'RESTRICT', 'root', false, 'failure two', now() - interval '1 second')", endpointId);
+        jdbc.update("INSERT INTO ise_action_audit (endpoint_id, action_type, operator, succeeded, detail) VALUES (?, 'RESTRICT', 'root', true, 'success')", endpointId);
+        jdbc.update("INSERT INTO ise_action_audit (endpoint_id, action_type, operator, succeeded, detail) VALUES (?, 'SHARE_POSTURE', 'root', false, 'failure other action')", endpointId);
+
+        var first = MockMvcRequestBuilders.get("/api/v1/audit/ise-actions/page")
+                .param("endpointId", endpointId.toString()).param("actionType", "RESTRICT")
+                .param("succeeded", "false").param("q", "failure").param("size", "1").param("page", "0");
+        mvc.perform(first.with(SecurityMockMvcRequestPostProcessors.user("root").roles("ADMIN")))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.total").value(2))
+                .andExpect(jsonPath("$.items.length()").value(1)).andExpect(jsonPath("$.items[0].detail").value("failure two"));
+        mvc.perform(MockMvcRequestBuilders.get("/api/v1/audit/ise-actions/page")
+                        .param("endpointId", endpointId.toString()).param("actionType", "RESTRICT")
+                        .param("succeeded", "false").param("q", "failure").param("size", "1").param("page", "1")
+                        .with(SecurityMockMvcRequestPostProcessors.user("root").roles("ADMIN")))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.total").value(2))
+                .andExpect(jsonPath("$.items.length()").value(1)).andExpect(jsonPath("$.items[0].detail").value("failure one"));
+        jdbc.update("DELETE FROM endpoint WHERE id = ?", endpointId);
+    }
     @Test
     void theIseCredentialOpensNothingElse() throws Exception {
         String h = basic("ise-feed", "feed-test-password");

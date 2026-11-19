@@ -1,6 +1,8 @@
 package com.endpointposture.diagnostic;
 
 import com.endpointposture.diagnostic.dto.DiagnosticResponse;
+import com.endpointposture.api.ApiPaging;
+import com.endpointposture.endpoint.dto.PageResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.http.ResponseEntity;
@@ -27,10 +29,19 @@ public class DiagnosticQueryController {
 
     @Operation(summary = "Diagnostic history for an endpoint, newest first")
     @GetMapping
-    public List<DiagnosticResponse> history(@PathVariable UUID id,
+    public List<DiagnosticResponse> history(@PathVariable UUID id) {
+        return service.history(id);
+    }
+
+    @Operation(summary = "Page through this endpoint history, newest first",
+            description = "Zero-based page; size defaults to 100 and is capped at 500.")
+    @GetMapping("/page")
+    public PageResponse<DiagnosticResponse> historyPage(@PathVariable UUID id,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "100") int size) {
-        return service.history(id, page, size);
+        var pageable = ApiPaging.of(page, size);
+        return new PageResponse<>(service.history(id, pageable.getPageNumber(), pageable.getPageSize()), service.historyCount(id),
+                pageable.getPageNumber(), pageable.getPageSize());
     }
 
     @Operation(summary = "Latest diagnostic run for an endpoint",

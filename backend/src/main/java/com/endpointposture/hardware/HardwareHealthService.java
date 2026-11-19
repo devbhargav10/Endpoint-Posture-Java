@@ -125,7 +125,13 @@ public HardwareHealthResponse recordFailure(UUID endpointId, UUID jobId, String 
 
     @Transactional(readOnly = true)
     public List<HardwareHealthResponse> getHistoryForEndpoint(UUID endpointId) {
-        return getHistoryForEndpoint(endpointId, 0, ApiPaging.DEFAULT_SIZE);
+        return healthRepository.findByEndpointIdOrderByCollectedAtDescIdDesc(endpointId).stream()
+                .map(this::toResponse).toList();
+    }
+
+    @Transactional(readOnly = true)
+    public long historyCount(UUID endpointId) {
+        return healthRepository.countByEndpointId(endpointId);
     }
 
     @Transactional(readOnly = true)

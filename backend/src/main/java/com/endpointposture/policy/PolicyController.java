@@ -1,6 +1,8 @@
 package com.endpointposture.policy;
 
 import com.endpointposture.policy.PolicyService.PolicySnapshot;
+import com.endpointposture.api.ApiPaging;
+import com.endpointposture.endpoint.dto.PageResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -40,9 +42,18 @@ public class PolicyController {
 
     @Operation(summary = "Every policy version, newest first")
     @GetMapping("/history")
-    public List<PolicySnapshot> history(@RequestParam(defaultValue = "0") int page,
-                                        @RequestParam(defaultValue = "100") int size) {
-        return service.history(page, size);
+    public List<PolicySnapshot> history() {
+        return service.history();
+    }
+
+    @Operation(summary = "Page through policy history, newest first",
+            description = "Zero-based page; size defaults to 100 and is capped at 500.")
+    @GetMapping("/history/page")
+    public PageResponse<PolicySnapshot> historyPage(@RequestParam(defaultValue = "0") int page,
+                                                     @RequestParam(defaultValue = "100") int size) {
+        var pageable = ApiPaging.of(page, size);
+        return new PageResponse<>(service.history(pageable.getPageNumber(), pageable.getPageSize()),
+                service.historyCount(), pageable.getPageNumber(), pageable.getPageSize());
     }
 
     @Operation(summary = "Replace the active policy with a new version",

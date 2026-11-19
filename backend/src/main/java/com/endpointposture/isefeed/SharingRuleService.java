@@ -57,7 +57,13 @@ public class SharingRuleService {
 
     @Transactional(readOnly = true)
     public List<Rule> history() {
-        return history(0, ApiPaging.DEFAULT_SIZE);
+        return jdbc.query("SELECT " + COLUMNS + " FROM ise_sharing_rule ORDER BY version DESC", MAPPER);
+    }
+
+    @Transactional(readOnly = true)
+    public long historyCount() {
+        Long count = jdbc.queryForObject("SELECT count(*) FROM ise_sharing_rule", Long.class);
+        return count == null ? 0 : count;
     }
 
     @Transactional(readOnly = true)

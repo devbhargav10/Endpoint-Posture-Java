@@ -26,7 +26,12 @@ public class UserService {
 
     @Transactional(readOnly = true)
     public List<User> list() {
-        return list(0, ApiPaging.DEFAULT_SIZE);
+        return users.findAll(Sort.by(Sort.Order.asc("username").ignoreCase(), Sort.Order.asc("id")));
+    }
+
+    @Transactional(readOnly = true)
+    public long count() {
+        return users.count();
     }
 
     @Transactional(readOnly = true)

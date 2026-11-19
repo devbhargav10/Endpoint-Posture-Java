@@ -277,7 +277,7 @@ class DiagnosticServiceTest {
     void historyKeepsTheRepositoryOrderNewestFirst() {
         EndpointDiagnostic newer = row(EndpointDiagnostic.Status.OK, 90);
         EndpointDiagnostic older = row(EndpointDiagnostic.Status.WINRM_UNAVAILABLE, null);
-        when(repository.findByEndpointIdOrderByCollectedAtDescIdDesc(eq(endpointId), any())).thenReturn(List.of(newer, older));
+        when(repository.findByEndpointIdOrderByCollectedAtDescIdDesc(endpointId)).thenReturn(List.of(newer, older));
 
         List<DiagnosticResponse> out = service.history(endpointId);
 

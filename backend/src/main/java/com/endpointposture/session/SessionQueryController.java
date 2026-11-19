@@ -3,6 +3,7 @@ package com.endpointposture.session;
 import com.endpointposture.endpoint.EndpointNotFoundException;
 import com.endpointposture.endpoint.EndpointRepository;
 import com.endpointposture.api.ApiPaging;
+import com.endpointposture.endpoint.dto.PageResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.web.bind.annotation.*;
@@ -30,12 +31,29 @@ public class SessionQueryController {
 
     @Operation(summary = "Session history for an endpoint, newest first")
     @GetMapping
-    public List<SessionEventResponse> history(@PathVariable UUID id,
+    public List<SessionEventResponse> history(@PathVariable UUID id) {
+        requireEndpoint(id);
+        return map(logs.findByEndpointIdOrderByEventAtDescIdDesc(id));
+    }
+
+    @Operation(summary = "Page through session history, newest first",
+            description = "Zero-based page; size defaults to 100 and is capped at 500.")
+    @GetMapping("/page")
+    public PageResponse<SessionEventResponse> historyPage(@PathVariable UUID id,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "100") int size) {
+        requireEndpoint(id);
+        var pageable = ApiPaging.of(page, size);
+        return new PageResponse<>(map(logs.findByEndpointIdOrderByEventAtDescIdDesc(id, pageable)),
+                logs.countByEndpointId(id), pageable.getPageNumber(), pageable.getPageSize());
+    }
+
+    private void requireEndpoint(UUID id) {
         if (!endpoints.existsById(id)) throw new EndpointNotFoundException(id.toString());
-        return logs.findByEndpointIdOrderByEventAtDescIdDesc(id, ApiPaging.of(page, size)).stream()
-                .map(e -> new SessionEventResponse(e.getId(), e.getEventType(), e.getIpAddress(), e.getEventAt()))
+    }
+
+    private static List<SessionEventResponse> map(List<EndpointSessionLog> events) {
+        return events.stream().map(e -> new SessionEventResponse(e.getId(), e.getEventType(), e.getIpAddress(), e.getEventAt()))
                 .toList();
     }
 }

@@ -15,7 +15,11 @@ import org.springframework.data.domain.Pageable;
  */
 public interface AssessmentRepository extends JpaRepository<Assessment, UUID> {
 
+    List<Assessment> findByEndpointIdOrderByCreatedAtDescIdDesc(UUID endpointId);
+
     List<Assessment> findByEndpointIdOrderByCreatedAtDescIdDesc(UUID endpointId, Pageable pageable);
+
+    long countByEndpointId(UUID endpointId);
 
     /**
      * @return its most recent assessment, or empty if it has never been assessed

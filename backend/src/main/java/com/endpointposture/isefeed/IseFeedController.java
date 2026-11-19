@@ -1,6 +1,8 @@
 package com.endpointposture.isefeed;
 
 import com.endpointposture.isefeed.IseFeedService.Feed;
+import com.endpointposture.api.ApiPaging;
+import com.endpointposture.endpoint.dto.PageResponse;
 import com.endpointposture.isefeed.SharingRuleService.Rule;
 import com.endpointposture.isefeed.SharingRuleService.Scope;
 import io.swagger.v3.oas.annotations.Operation;
@@ -48,6 +50,17 @@ public class IseFeedController {
         return feedService.fetch(page, size, auth.getName());
     }
 
+    @Operation(summary = "Interactive paged preview of the ISE feed",
+            description = "ADMIN only. Zero-based page; size defaults to 100 and is capped at 500. ISE ingestion remains capped at 50,000.")
+    @PreAuthorize("hasRole('ADMIN')")
+    @GetMapping("/endpoints/preview")
+    public Feed preview(@RequestParam(defaultValue = "0") int page,
+                        @RequestParam(defaultValue = "100") int size,
+                        Authentication auth) {
+        var pageable = ApiPaging.of(page, size);
+        return feedService.fetch(pageable.getPageNumber(), pageable.getPageSize(), auth.getName());
+    }
+
     @Operation(summary = "The active sharing rule")
     @GetMapping("/sharing-rule")
     public Rule activeRule() {
@@ -56,9 +69,18 @@ public class IseFeedController {
 
     @Operation(summary = "Every sharing-rule version, newest first")
     @GetMapping("/sharing-rule/history")
-    public List<Rule> history(@RequestParam(defaultValue = "0") int page,
-                              @RequestParam(defaultValue = "100") int size) {
-        return ruleService.history(page, size);
+    public List<Rule> history() {
+        return ruleService.history();
+    }
+
+    @Operation(summary = "Page through sharing-rule history, newest first",
+            description = "Zero-based page; size defaults to 100 and is capped at 500.")
+    @GetMapping("/sharing-rule/history/page")
+    public PageResponse<Rule> historyPage(@RequestParam(defaultValue = "0") int page,
+                                          @RequestParam(defaultValue = "100") int size) {
+        var pageable = ApiPaging.of(page, size);
+        return new PageResponse<>(ruleService.history(pageable.getPageNumber(), pageable.getPageSize()),
+                ruleService.historyCount(), pageable.getPageNumber(), pageable.getPageSize());
     }
 
     @Operation(summary = "Approve a new sharing rule (ADMIN)",

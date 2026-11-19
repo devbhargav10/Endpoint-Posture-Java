@@ -1,5 +1,9 @@
 package com.endpointposture.warranty;
 
+import com.endpointposture.api.ApiPaging;
+import com.endpointposture.endpoint.dto.PageResponse;
+import io.swagger.v3.oas.annotations.Operation;
+
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -27,10 +31,20 @@ public class WarrantyController {
         this.service = service;
     }
 
+    @Operation(summary = "List all warranty records (legacy array)")
     @GetMapping
-    public List<WarrantyView> listAll(@RequestParam(defaultValue = "0") int page,
-                                      @RequestParam(defaultValue = "100") int size) {
-        return service.listAll(page, size).stream().map(WarrantyView::of).toList();
+    public List<WarrantyView> listAll() {
+        return service.listAll().stream().map(WarrantyView::of).toList();
+    }
+
+    @Operation(summary = "Page through warranty records, newest upload first",
+            description = "Zero-based page; size defaults to 100 and is capped at 500.")
+    @GetMapping("/page")
+    public PageResponse<WarrantyView> page(@RequestParam(defaultValue = "0") int page,
+                                           @RequestParam(defaultValue = "100") int size) {
+        var pageable = ApiPaging.of(page, size);
+        return new PageResponse<>(service.listAll(pageable.getPageNumber(), pageable.getPageSize()).stream()
+                .map(WarrantyView::of).toList(), service.count(), pageable.getPageNumber(), pageable.getPageSize());
     }
 
     @PostMapping("/upload")

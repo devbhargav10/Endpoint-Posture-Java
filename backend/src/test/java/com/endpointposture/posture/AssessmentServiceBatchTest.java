@@ -55,7 +55,7 @@ class AssessmentServiceBatchTest {
     @Test
     void historyLoadsAllChecksWithOneQueryAndAttachesThemToTheRightAssessment() {
         Assessment a1 = assessment(), a2 = assessment(), a3 = assessment();
-        when(assessments.findByEndpointIdOrderByCreatedAtDescIdDesc(eq(endpointId), any())).thenReturn(List.of(a1, a2, a3));
+        when(assessments.findByEndpointIdOrderByCreatedAtDescIdDesc(endpointId)).thenReturn(List.of(a1, a2, a3));
         when(checks.findByAssessmentIdIn(anyCollection()))
                 .thenReturn(List.of(check(a1, "FIREWALL"), check(a1, "OPEN_PORTS"), check(a3, "FIREWALL")));
 
@@ -83,7 +83,7 @@ class AssessmentServiceBatchTest {
 
     @Test
     void noAssessmentsMeansNoCheckQueriesAtAll() {
-        when(assessments.findByEndpointIdOrderByCreatedAtDescIdDesc(eq(endpointId), any())).thenReturn(List.of());
+        when(assessments.findByEndpointIdOrderByCreatedAtDescIdDesc(endpointId)).thenReturn(List.of());
         assertTrue(service.getHistoryForEndpoint(endpointId).isEmpty());
         verifyNoInteractions(checks);
     }

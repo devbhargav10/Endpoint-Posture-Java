@@ -13,7 +13,11 @@ import java.util.UUID;
 
 public interface HardwareHealthRepository extends JpaRepository<HardwareHealthReport, UUID> {
 
+        List<HardwareHealthReport> findByEndpointIdOrderByCollectedAtDescIdDesc(UUID endpointId);
+
         List<HardwareHealthReport> findByEndpointIdOrderByCollectedAtDescIdDesc(UUID endpointId, Pageable pageable);
+
+        long countByEndpointId(UUID endpointId);
 
         Optional<HardwareHealthReport> findFirstByEndpointIdOrderByCollectedAtDesc(UUID endpointId);
 

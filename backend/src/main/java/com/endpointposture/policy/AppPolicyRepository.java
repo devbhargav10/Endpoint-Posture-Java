@@ -17,5 +17,7 @@ public interface AppPolicyRepository extends JpaRepository<AppPolicy, UUID> {
     Optional<AppPolicy> findFirstByOrderByVersionDesc();
 
     /** @return every policy version, newest first */
+    List<AppPolicy> findAllByOrderByVersionDesc();
+
     List<AppPolicy> findAllByOrderByVersionDesc(Pageable pageable);
 }

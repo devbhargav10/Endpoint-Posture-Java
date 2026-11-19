@@ -37,7 +37,7 @@ public class IseFeedService {
                      WHERE cr.assessment_id = e.latest_assessment_id AND cr.status <> 'COMPLIANT') AS failed,
                    (SELECT s.risk_level FROM endpoint_security_indicator s
                      WHERE s.endpoint_id = e.id AND s.status = 'OK'
-                     ORDER BY s.collected_at DESC LIMIT 1) AS risk
+                     ORDER BY s.collected_at DESC, s.id DESC LIMIT 1) AS risk
               FROM endpoint e
              WHERE e.latest_status IS NOT NULL AND\s""";
 
@@ -66,7 +66,7 @@ public class IseFeedService {
         if (scopeSql != null) {
             Long count = jdbc.queryForObject("SELECT count(*) FROM endpoint e WHERE e.latest_status IS NOT NULL AND " + scopeSql, Long.class);
             total = count == null ? 0 : count;
-            items = jdbc.query(SELECT + scopeSql + " ORDER BY e.mac_address LIMIT ? OFFSET ?",
+            items = jdbc.query(SELECT + scopeSql + " ORDER BY e.mac_address, e.id LIMIT ? OFFSET ?",
                     (rs, i) -> new FeedEndpoint(
                             rs.getString("mac_address"),
                             rs.getString("latest_status"),

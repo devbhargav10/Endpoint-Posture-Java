@@ -250,7 +250,7 @@ class SecurityIndicatorServiceTest {
     void historyKeepsRepositoryOrderAndLatestIsEmptyWhenNeverScanned() {
         EndpointSecurityIndicator a = row(RiskLevel.HIGH);
         EndpointSecurityIndicator b = row(RiskLevel.NONE);
-        when(repository.findByEndpointIdOrderByCollectedAtDescIdDesc(eq(endpointId), any())).thenReturn(List.of(a, b));
+        when(repository.findByEndpointIdOrderByCollectedAtDescIdDesc(endpointId)).thenReturn(List.of(a, b));
         List<SecurityIndicatorResponse> out = service.history(endpointId);
         assertEquals(a.getId(), out.get(0).id());
         assertEquals(b.getId(), out.get(1).id());

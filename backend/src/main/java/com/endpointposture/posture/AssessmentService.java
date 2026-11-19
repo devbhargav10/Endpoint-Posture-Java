@@ -105,7 +105,12 @@ public class AssessmentService {
     /** @return all of an endpoint's assessments, newest first (empty list if none); checks loaded in one batch */
     @Transactional(readOnly = true)
     public List<AssessmentResponse> getHistoryForEndpoint(UUID endpointId) {
-        return getHistoryForEndpoint(endpointId, 0, ApiPaging.DEFAULT_SIZE);
+        return toResponses(assessmentRepository.findByEndpointIdOrderByCreatedAtDescIdDesc(endpointId));
+    }
+
+    @Transactional(readOnly = true)
+    public long historyCount(UUID endpointId) {
+        return assessmentRepository.countByEndpointId(endpointId);
     }
 
     @Transactional(readOnly = true)

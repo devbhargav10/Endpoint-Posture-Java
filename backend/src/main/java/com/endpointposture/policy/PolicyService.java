@@ -59,7 +59,12 @@ public class PolicyService {
     /** @return every policy version, newest first */
     @Transactional(readOnly = true)
     public List<PolicySnapshot> history() {
-        return history(0, ApiPaging.DEFAULT_SIZE);
+        return policies.findAllByOrderByVersionDesc().stream().map(this::toSnapshot).toList();
+    }
+
+    @Transactional(readOnly = true)
+    public long historyCount() {
+        return policies.count();
     }
 
     @Transactional(readOnly = true)

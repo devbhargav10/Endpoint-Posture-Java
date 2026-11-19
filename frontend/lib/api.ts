@@ -454,6 +454,8 @@ export const api = {
   postureHistory: (id: string) =>
     request<AssessmentResponse[]>(`/api/v1/endpoints/${id}/posture`),
 
+  postureHistoryPage: (id: string, page = 0, size = 25) => request<PageResponse<AssessmentResponse>>(`/api/v1/endpoints/${id}/posture/page?page=${page}&size=${size}`),
+
   latestHardwareOrNull: (id: string) =>
     request<HardwareHealthResponse | null>(
       `/api/v1/endpoints/${id}/hardware-health/latest`,
@@ -463,6 +465,14 @@ export const api = {
     request<HardwareHealthResponse[]>(
       `/api/v1/endpoints/${id}/hardware-health`,
     ),
+
+  hardwareHistoryPage: (id: string, page = 0, size = 25) => request<PageResponse<HardwareHealthResponse>>(`/api/v1/endpoints/${id}/hardware-health/page?page=${page}&size=${size}`),
+
+  diagnosticsHistoryPage: (id: string, page = 0, size = 25) => request<PageResponse<DiagnosticResponse>>(`/api/v1/endpoints/${id}/diagnostics/page?page=${page}&size=${size}`),
+
+  securityIndicatorsHistoryPage: (id: string, page = 0, size = 25) => request<PageResponse<SecurityIndicatorResponse>>(`/api/v1/endpoints/${id}/security-indicators/page?page=${page}&size=${size}`),
+
+  sessionsHistoryPage: (id: string, page = 0, size = 25) => request<PageResponse<SessionEvent>>(`/api/v1/endpoints/${id}/sessions/page?page=${page}&size=${size}`),
 
   hardwarePage: (
     p: {
@@ -646,6 +656,20 @@ export const api = {
     return request<IseActionAudit[]>(`/api/v1/audit/ise-actions?${qs}`);
   },
 
+  auditActionsPage: (p: { page?: number; size?: number; endpointId?: string; actionType?: string; succeeded?: boolean; q?: string } = {}) => {
+    const qs = new URLSearchParams({ page: String(p.page ?? 0), size: String(p.size ?? 25) });
+    if (p.endpointId) qs.set("endpointId", p.endpointId);
+    if (p.actionType && p.actionType !== "ALL") qs.set("actionType", p.actionType);
+    if (p.succeeded !== undefined) qs.set("succeeded", String(p.succeeded));
+    if (p.q?.trim()) qs.set("q", p.q.trim());
+    return request<PageResponse<IseActionAudit>>(`/api/v1/audit/ise-actions/page?${qs}`);
+  },
+
+  auditSummary: () => request<{ total: number; sharePosture: number; restrict: number; succeeded: number }>("/api/v1/audit/ise-actions/summary"),
+
+  iseActionsStatePage: (page = 0, size = 25) =>
+    request<PageResponse<IseActionState>>(`/api/v1/ise/actions/state/page?page=${page}&size=${size}`),
+
   iseActionsState: () =>
     request<IseActionState[]>("/api/v1/ise/actions/state"),
 
@@ -661,6 +685,8 @@ export const api = {
 
   policyHistory: () => request<AppPolicy[]>("/api/v1/policy/apps/history"),
 
+  policyHistoryPage: (page = 0, size = 25) => request<PageResponse<AppPolicy>>(`/api/v1/policy/apps/history/page?page=${page}&size=${size}`),
+
   updatePolicy: (requiredApps: string[], blockedApps: string[]) =>
     request<AppPolicy>("/api/v1/policy/apps", {
       method: "PUT",
@@ -671,6 +697,8 @@ export const api = {
     }),
 
   users: () => request<UserView[]>("/api/v1/users"),
+
+  usersPage: (page = 0, size = 25) => request<PageResponse<UserView>>(`/api/v1/users/page?page=${page}&size=${size}`),
 
   createUser: (username: string, password: string, role: UserRole) =>
     request<UserView>("/api/v1/users", {
@@ -708,6 +736,8 @@ export const api = {
   // ── Warranty ────────────────────────────────────────────────────────────────
 
   listWarranty: () => request<WarrantyView[]>("/api/v1/warranty"),
+
+  warrantyPage: (page = 0, size = 25) => request<PageResponse<WarrantyView>>(`/api/v1/warranty/page?page=${page}&size=${size}`),
 
   uploadWarrantyCsv: (file: File): Promise<WarrantyUploadResult> => {
     const form = new FormData();

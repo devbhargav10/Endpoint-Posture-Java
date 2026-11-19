@@ -1,5 +1,8 @@
 package com.endpointposture.security;
 
+import com.endpointposture.api.ApiPaging;
+import com.endpointposture.endpoint.dto.PageResponse;
+
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -51,11 +54,20 @@ public class UserController {
         this.service = service;
     }
 
-    @Operation(summary = "List users")
+    @Operation(summary = "List all users (legacy array)")
     @GetMapping
-    public List<UserView> list(@RequestParam(defaultValue = "0") int page,
-                               @RequestParam(defaultValue = "100") int size) {
-        return service.list(page, size).stream().map(UserView::of).toList();
+    public List<UserView> list() {
+        return service.list().stream().map(UserView::of).toList();
+    }
+
+    @Operation(summary = "Page through users",
+            description = "Zero-based page; size defaults to 100 and is capped at 500. Sorted by username then ID.")
+    @GetMapping("/page")
+    public PageResponse<UserView> page(@RequestParam(defaultValue = "0") int page,
+                                       @RequestParam(defaultValue = "100") int size) {
+        var pageable = ApiPaging.of(page, size);
+        return new PageResponse<>(service.list(pageable.getPageNumber(), pageable.getPageSize()).stream()
+                .map(UserView::of).toList(), service.count(), pageable.getPageNumber(), pageable.getPageSize());
     }
 
     @Operation(summary = "Create a user")

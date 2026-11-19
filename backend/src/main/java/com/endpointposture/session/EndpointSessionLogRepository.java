@@ -7,5 +7,7 @@ import java.util.UUID;
 import org.springframework.data.domain.Pageable;
 
 public interface EndpointSessionLogRepository extends JpaRepository<EndpointSessionLog, UUID> {
+    List<EndpointSessionLog> findByEndpointIdOrderByEventAtDescIdDesc(UUID endpointId);
     List<EndpointSessionLog> findByEndpointIdOrderByEventAtDescIdDesc(UUID endpointId, Pageable pageable);
+    long countByEndpointId(UUID endpointId);
 }

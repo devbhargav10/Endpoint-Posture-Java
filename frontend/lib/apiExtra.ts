@@ -54,13 +54,15 @@ function qs(p: Record<string, string | number | undefined>): string {
 }
 
 export const apiExtra = {
+  sharingRuleHistoryPage: (page = 0, size = 25) =>
+    request<PageResponse<SharingRule>>(`/api/v1/integrations/ise/sharing-rule/history/page?page=${page}&size=${size}`),
   applicationsPage: (p: { page?: number; size?: number; q?: string; status?: string } = {}) =>
     request<PageResponse<AppRow>>(
       `/api/v1/applications/page?${qs({ page: p.page ?? 0, size: p.size ?? 25, q: p.q?.trim(), status: p.status })}`,
     ),
-  // ADMIN only (the route accepts the ISE credential or an admin JWT). Every call writes a feed audit row.
+  // ADMIN-only preview; the separate ISE ingestion route retains its 50,000-row batch limit.
   iseFeedPreview: (p: { page?: number; size?: number } = {}) =>
-    request<IseFeed>(`/api/v1/integrations/ise/endpoints?${qs({ page: p.page ?? 0, size: p.size ?? 25 })}`),
+    request<IseFeed>(`/api/v1/integrations/ise/endpoints/preview?${qs({ page: p.page ?? 0, size: p.size ?? 25 })}`),
 
   applicationsSummary: () => request<AppSummary>("/api/v1/applications/summary"),
 

@@ -26,6 +26,16 @@ public class IseActionStateService {
     }
 
     @Transactional(readOnly = true)
+    public com.endpointposture.endpoint.dto.PageResponse<IseActionStateResponse> getLatestEnforcementStatesPage(int page, int size) {
+        var pageable = ApiPaging.of(page, size);
+        List<IseActionStateResponse> items = auditRepository
+                .findLatestEnforcementActionsPerEndpoint(pageable.getPageSize(), pageable.getOffset())
+                .stream().map(IseActionStateResponse::from).toList();
+        return new com.endpointposture.endpoint.dto.PageResponse<>(items,
+                auditRepository.countLatestEnforcementEndpoints(), pageable.getPageNumber(), pageable.getPageSize());
+    }
+
+    @Transactional(readOnly = true)
     public List<IseActionStateResponse> getLatestEnforcementStates(int page, int size) {
         var pageable = ApiPaging.of(page, size);
         return auditRepository.findLatestEnforcementActionsPerEndpoint(pageable.getPageSize(), pageable.getOffset())
